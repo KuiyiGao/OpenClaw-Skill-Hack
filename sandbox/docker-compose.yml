@@ -1,0 +1,81 @@
+# OpenClaw 隔离实验室（真实 LLM）。三个服务：
+#   egress-proxy : 出网允许列表（只放行 .env 里的 LLM 域名，其它全拒）——“代码保险”主防线
+#   openclaw     : 真实 OpenClaw，内网 only，所有出网必须过 proxy；只持有 LLM_API_KEY 一个凭据
+#   canary       : 内网蜜罐 tripwire，记录任何被诱导的内部探测/外泄尝试
+#
+# 安全不变量（确保 VM 中的 OpenClaw 接触不到任何可被攻击的外部 credentials）：
+#   - openclaw 仅接入 internal（internal:true）→ 无直连外网、无云元数据路由
+#   - 唯一出网通道 = egress-proxy，且只允许 LLM 域名（云元数据 169.254/100.100 一律拒）
+#   - 非 root + 只读根 + cap_drop ALL + no-new-privileges；不挂载任何主机密钥
+#   - 容器内唯一 secret = LLM_API_KEY（来自 .env），其余环境变量不注入
+name: openclaw-lab
+
+networks:
+  internal:
+    internal: true          # 无外网路由
+  egress:
+    driver: bridge          # 仅 proxy 接入
+
+volumes:
+  openclaw-state:           # 持久化 ~/.openclaw（技能/配置跨重启保留 → 测完一众 skills 可重启）
+
+services:
+  egress-proxy:                     # 极简 Python 允许列表代理（egress_proxy.py）
+    image: asshack-openclaw:latest
+    entrypoint: ["python3"]         # 覆盖 OpenClaw entrypoint（代理无需 LLM_API_KEY）
+    command: ["/app/sandbox/egress_proxy.py"]
+    networks: [internal, egress]
+    environment:
+      - EGRESS_ALLOW=${EGRESS_ALLOW:-api.openai.com}
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [ /tmp ]
+    cap_drop: [ALL]
+    security_opt: [ "no-new-privileges:true" ]
+    mem_limit: 128m
+    restart: "no"
+
+  canary:
+    image: asshack-openclaw:latest
+    entrypoint: ["python3"]          # 覆盖 OpenClaw entrypoint（canary 无需 LLM_API_KEY）
+    command: ["/app/sandbox/canary.py"]
+    networks: [internal]
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [ /tmp ]
+    cap_drop: [ALL]
+    security_opt: [ "no-new-privileges:true" ]
+    mem_limit: 128m
+    restart: "no"
+
+  openclaw:
+    image: asshack-openclaw:latest
+    build:
+      context: ..
+      dockerfile: sandbox/Dockerfile.openclaw
+    depends_on: [egress-proxy, canary]
+    networks: [internal]      # 永远只在内网；出网必须过 proxy
+    user: "65532:65532"
+    environment:
+      - HOME=/home/lab
+      # 唯一凭据 + 模型配置（来自 .env）
+      - LLM_API_KEY=${LLM_API_KEY:?请在 sandbox/.env 设置 LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_API=${LLM_API:-openai-responses}
+      # 出网代理：OpenClaw 的 LLM 调用走 proxy；其它一切被拒/无路由
+      - HTTPS_PROXY=http://egress-proxy:3128
+      - HTTP_PROXY=http://egress-proxy:3128
+      - NO_PROXY=canary,localhost,127.0.0.1
+      - CANARY_URL=http://canary:8088
+    volumes:
+      - openclaw-state:/home/lab/.openclaw
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    cap_drop: [ALL]
+    security_opt: [ "no-new-privileges:true" ]
+    pids_limit: 512
+    mem_limit: 1g
+    restart: "no"
+    command: ["tail","-f","/dev/null"]   # 常驻；用 oc-ask / monitor / skillctl 操作

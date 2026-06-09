@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+.venv/
+venv/
+*.egg-info/
+# 自动生成的语料 / 实验产物
+data/skills_rugpull_generated/
+runs/
+*.sarif
+
+# 云部署：绝不提交私钥与状态文件
+*.pem
+deploy/**/.lab-state.env
+sandbox/_canary/
+
+# 真实 LLM 凭据，绝不进 git
+sandbox/.env
+.env
+
+# 不发布 IDE/agent 配置
+.claude/

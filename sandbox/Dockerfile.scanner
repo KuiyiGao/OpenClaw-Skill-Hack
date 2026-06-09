@@ -1,0 +1,12 @@
+# Cisco AI Defense Skill Scanner，装在隔离容器里（不碰主机）。
+# 基于本地 asshack-sandbox 镜像（避免再次拉取 Docker Hub 基础镜像）。
+# 构建：  docker build -f sandbox/Dockerfile.scanner -t asshack-scanner:latest .
+#   （需先有 asshack-sandbox:latest： docker build -f sandbox/Dockerfile -t asshack-sandbox:latest .）
+# 扫描是【静态分析】：只读文件、不执行被扫技能 → 扫描阶段可 --network none。
+FROM asshack-sandbox:latest
+
+USER root
+# 构建期联网仅为安装扫描器本体（发生在隔离环境）
+RUN pip install --no-cache-dir cisco-ai-skill-scanner
+USER 65532:65532
+CMD ["bash"]

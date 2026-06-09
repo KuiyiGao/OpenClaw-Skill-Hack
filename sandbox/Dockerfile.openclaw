@@ -1,0 +1,25 @@
+# 真实 OpenClaw（npm 包 openclaw），装在隔离容器里（不碰主机）。
+# 基于本地 asshack-sandbox（Debian），NodeSource 装 Node 24，避免再拉 Docker Hub。
+# 构建：  docker build -f sandbox/Dockerfile.openclaw -t asshack-openclaw:latest .
+FROM asshack-sandbox:latest
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装真实 OpenClaw（构建期联网，发生在隔离环境）
+RUN npm install -g openclaw@latest
+
+# 非 root 家目录 + 入口脚本（运行时用 .env 生成真实 LLM 配置）
+RUN mkdir -p /home/lab/.openclaw/workspace/skills && chown -R 65532:65532 /home/lab/.openclaw
+COPY --chown=65532:65532 sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+USER 65532:65532
+ENV HOME=/home/lab \
+    PATH=/home/lab/.local/bin:$PATH
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["tail", "-f", "/dev/null"]
