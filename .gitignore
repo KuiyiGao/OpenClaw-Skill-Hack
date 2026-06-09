@@ -1,23 +1,34 @@
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.DS_Store
 .venv/
 venv/
 *.egg-info/
-# 自动生成的语料 / 实验产物
-data/skills_rugpull_generated/
-runs/
-*.sarif
 
-# 云部署：绝不提交私钥与状态文件
-*.pem
-deploy/**/.lab-state.env
-sandbox/_canary/
+# OS
+.DS_Store
 
-# 真实 LLM 凭据，绝不进 git
+# Secrets and state -- never commit
 sandbox/.env
 .env
+*.pem
+deploy/**/.lab-state.env
 
-# 不发布 IDE/agent 配置
+# Generated artifacts
+runs/
+*.sarif
+sandbox/_canary/
+
+# IDE / agent config
 .claude/
+
+# Published repo = OpenClaw sandbox loop only. Keep these local; do not publish.
+/src/
+/scripts/
+/data/
+/configs/
+/tests/
+/deploy/
+/docs/
+/README.md

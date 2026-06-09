@@ -1,32 +1,27 @@
-# 便捷入口。两块：① OpenClaw 隔离实验室（真实 LLM，当前重点）② 攻防研究框架（离线）。
+# OpenClaw isolation lab (real LLM). First: cp sandbox/.env.example sandbox/.env and set your key.
 SB := sandbox
 CF := docker compose -f $(SB)/docker-compose.yml --env-file $(SB)/.env
-MSG ?= 用一句话介绍你自己
+MSG ?= Introduce yourself in one sentence.
 
-.PHONY: help oc-build oc-up oc-down oc-ask oc-monitor oc-skills oc-shell demo test
+.PHONY: help oc-build oc-up oc-down oc-ask oc-monitor oc-skills oc-shell
 
 help:
-	@echo "OpenClaw 隔离实验室（真实 LLM；先 cp $(SB)/.env.example $(SB)/.env 并填 key）:"
-	@echo "  make oc-build              构建 OpenClaw 镜像（Node24 + npm i -g openclaw）"
-	@echo "  make oc-up                 启动锁定沙箱（egress 允许列表 + canary + openclaw 常驻）"
-	@echo "  make oc-ask MSG=\"...\"       让 OpenClaw 回答（真实模型），看它的反应"
-	@echo "  make oc-monitor            监控入口：OpenClaw 反应 / canary 命中 / 被拦截的外泄"
-	@echo "  make oc-skills             列出 OpenClaw 已装技能"
-	@echo "  make oc-down               停止并清理"
-	@echo "  技能门控：  ./sandbox/skillctl.sh add <skill_dir>   （Cisco 扫描门 + 你批准）"
-	@echo ""
-	@echo "攻防研究框架（离线，零依赖）:"
-	@echo "  make demo                  攻击→(防御)→指标 demo"
-	@echo "  make test                  单测"
+	@echo "make oc-build           build the OpenClaw image (Node 24 + npm i -g openclaw)"
+	@echo "make oc-up              start the locked sandbox (egress-proxy + canary + openclaw)"
+	@echo "make oc-ask MSG=\"...\"    ask OpenClaw (real model)"
+	@echo "make oc-monitor         stream OpenClaw output / canary hits / blocked egress"
+	@echo "make oc-skills          list installed skills"
+	@echo "make oc-down            stop and clean up"
+	@echo "skill gate:  ./sandbox/skillctl.sh add <skill_dir>   (Cisco scan gate + your approval)"
 
 oc-build:
 	docker build -f $(SB)/Dockerfile          -t asshack-sandbox:latest  .
 	docker build -f $(SB)/Dockerfile.openclaw -t asshack-openclaw:latest .
 
 oc-up:
-	@test -f $(SB)/.env || { echo "请先: cp $(SB)/.env.example $(SB)/.env 并填入 LLM_API_KEY"; exit 1; }
+	@test -f $(SB)/.env || { echo "first: cp $(SB)/.env.example $(SB)/.env and set LLM_API_KEY"; exit 1; }
 	$(CF) up -d
-	@echo "已启动。试试: make oc-ask MSG=\"你好\"  /  make oc-monitor"
+	@echo "up. try: make oc-ask MSG=\"hi\"  /  make oc-monitor"
 
 oc-down:
 	$(CF) down
@@ -43,9 +38,3 @@ oc-skills:
 
 oc-shell:
 	$(CF) exec openclaw bash
-
-demo:
-	python3 scripts/run_demo.py
-
-test:
-	python3 -m pytest tests/ -q

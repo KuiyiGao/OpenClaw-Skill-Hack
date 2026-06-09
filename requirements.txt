@@ -1,7 +1,0 @@
-# 核心框架零依赖（纯标准库即可跑 scripts/run_demo.py）。
-# 以下为可选增强：
-pyyaml>=6.0          # 解析 configs/*.yaml 与 SKILL.md frontmatter（无则回退到内置极简解析器）
-pytest>=7.0          # 运行 tests/
-
-# 接入真实基线时按需安装：
-# cisco-ai-skill-scanner   # PDF §4 推荐的静态+行为扫描器（基线锚定）

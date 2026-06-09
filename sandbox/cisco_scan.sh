@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# 预留的 Cisco 扫描接口（静态分析，--network none，不执行被扫技能）。
+# Optional Cisco scanner interface (static analysis, --network none, never executes the skill).
 #   ./sandbox/cisco_scan.sh <skill_dir>
-# 输出该技能的 max_severity：NONE/INFO/LOW/MEDIUM/HIGH/CRITICAL；扫描失败=ERR；扫描器不可用=SKIP。
-# “保证能用就行”：镜像缺失时尝试构建；构建不了返回 SKIP（接口保留，不阻断流程）。
+# Prints max_severity: NONE/INFO/LOW/MEDIUM/HIGH/CRITICAL; ERR on scan failure; SKIP if scanner unavailable.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
-dir="${1:?用法: cisco_scan.sh <skill_dir>}"; abs="$(cd "$dir" && pwd)"
+dir="${1:?usage: cisco_scan.sh <skill_dir>}"; abs="$(cd "$dir" && pwd)"
 IMG="${SCANNER_IMAGE:-asshack-scanner:latest}"
 
 command -v docker >/dev/null || { echo "SKIP"; exit 0; }

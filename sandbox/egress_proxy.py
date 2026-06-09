@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""极简出网允许列表代理（“代码保险”主防线，stdlib only）。
+"""Tiny egress allowlist proxy (the core safety layer).
 
-只放行 EGRESS_ALLOW 里的域名（HTTPS via CONNECT）；其余一切——任意外泄目标、
-云元数据(169.254/100.100.100.200)、明文 HTTP——全部拒绝。被拒尝试打印 EGRESS DENY，
-monitor 可见。OpenClaw 的 LLM 调用经此放行，恶意技能的窃密外泄在此被挡。
+Only domains in EGRESS_ALLOW are reachable (HTTPS via CONNECT). Everything else --
+arbitrary exfil targets, cloud metadata (169.254.x / 100.100.100.200), plain HTTP --
+is denied. Denied attempts print "EGRESS DENY" so the monitor can see them.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def allowed(host: str) -> bool:
 
 
 class Proxy(BaseHTTPRequestHandler):
-    def do_CONNECT(self):  # HTTPS 隧道
+    def do_CONNECT(self):
         host = self.path.split(":")[0]
         port = int(self.path.split(":")[1]) if ":" in self.path else 443
         if not allowed(host):
@@ -65,7 +65,7 @@ class Proxy(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
-    def _deny_http(self):  # 明文 HTTP 一律拒绝（LLM 走 HTTPS）
+    def _deny_http(self):
         _log(f"DENY {self.command} {self.path}")
         self.send_error(403, "plain HTTP egress blocked")
 
