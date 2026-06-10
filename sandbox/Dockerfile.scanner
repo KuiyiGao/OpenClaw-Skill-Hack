@@ -1,5 +1,3 @@
-# Optional: Cisco AI Defense Skill Scanner, used by the scan-then-load gate.
-# Build: docker build -f sandbox/Dockerfile.scanner -t asshack-scanner:latest .
 FROM asshack-sandbox:latest
 
 USER root

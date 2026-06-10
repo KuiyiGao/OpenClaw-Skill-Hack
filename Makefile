@@ -1,4 +1,3 @@
-# OpenClaw isolation lab (real LLM). First: cp sandbox/.env.example sandbox/.env and set your key.
 SB := sandbox
 CF := docker compose -f $(SB)/docker-compose.yml --env-file $(SB)/.env
 MSG ?= Introduce yourself in one sentence.

@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""Tiny egress allowlist proxy (the core safety layer).
-
-Only domains in EGRESS_ALLOW are reachable (HTTPS via CONNECT). Everything else --
-arbitrary exfil targets, cloud metadata (169.254.x / 100.100.100.200), plain HTTP --
-is denied. Denied attempts print "EGRESS DENY" so the monitor can see them.
-"""
 from __future__ import annotations
 
 import os

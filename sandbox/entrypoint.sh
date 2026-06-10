@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Generate ~/.openclaw/openclaw.json from the injected .env LLM settings, then run the given command.
-# The API key comes only from LLM_API_KEY; no other secret is written.
 set -euo pipefail
 
 : "${LLM_API_KEY:?LLM_API_KEY is required (set it in sandbox/.env)}"
@@ -10,7 +8,6 @@ LLM_API="${LLM_API:-openai-completions}"
 
 mkdir -p "$HOME/.openclaw/workspace/skills"
 
-# Regenerate model config each boot from .env; installed skills persist in the named volume.
 CFG="$HOME/.openclaw/openclaw.json"
 LLM_MODEL="$LLM_MODEL" LLM_BASE_URL="$LLM_BASE_URL" LLM_API="$LLM_API" \
 python3 - "$CFG" <<'PY'

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Optional Cisco scanner interface (static analysis, --network none, never executes the skill).
-#   ./sandbox/cisco_scan.sh <skill_dir>
-# Prints max_severity: NONE/INFO/LOW/MEDIUM/HIGH/CRITICAL; ERR on scan failure; SKIP if scanner unavailable.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
 dir="${1:?usage: cisco_scan.sh <skill_dir>}"; abs="$(cd "$dir" && pwd)"

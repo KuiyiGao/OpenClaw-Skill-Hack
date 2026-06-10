@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Decide which skills OpenClaw may use (Cisco scan gate + explicit approval).
-#   ./sandbox/skillctl.sh list                 list installed skills
-#   ./sandbox/skillctl.sh scan <dir>           scan only, print Cisco severity
-#   ./sandbox/skillctl.sh add  <dir>           scan then install if clean (HIGH/CRITICAL rejected)
-#   ./sandbox/skillctl.sh add  <dir> --force   install anyway (your explicit approval)
-#   ./sandbox/skillctl.sh rm   <slug>          remove a skill
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
 CF="$HERE/docker-compose.yml"; cd "$ROOT"

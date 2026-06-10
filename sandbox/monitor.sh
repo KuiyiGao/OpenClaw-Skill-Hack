@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Monitoring entry point: stream OpenClaw output, canary tripwire hits, and blocked egress attempts.
-#   ./sandbox/monitor.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CF="$HERE/docker-compose.yml"

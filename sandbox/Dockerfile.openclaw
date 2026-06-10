@@ -1,5 +1,3 @@
-# Real OpenClaw (npm package "openclaw") in an isolated image. Build runs in your isolated env.
-# Build: docker build -f sandbox/Dockerfile.openclaw -t asshack-openclaw:latest .
 FROM asshack-sandbox:latest
 
 USER root
@@ -9,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm install -g openclaw@latest
 RUN mkdir -p /home/lab/.openclaw/workspace/skills && chown -R 65532:65532 /home/lab/.openclaw
 
@@ -16,6 +15,5 @@ USER 65532:65532
 ENV HOME=/home/lab \
     PATH=/home/lab/.local/bin:$PATH
 
-# Model endpoint + key are injected at runtime via sandbox/.env (never baked in).
 ENTRYPOINT ["/app/sandbox/entrypoint.sh"]
 CMD ["tail", "-f", "/dev/null"]

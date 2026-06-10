@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Internal honeypot tripwire. Any induced internal probe/exfil only reaches here;
-no real data leaves the sandbox. A hit prints "CANARY-HIT" so the monitor can see it."""
 from __future__ import annotations
 import json, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
