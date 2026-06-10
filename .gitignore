@@ -19,6 +19,7 @@ deploy/**/.lab-state.env
 runs/
 *.sarif
 sandbox/_canary/
+sandbox/_events/
 
 # IDE / agent config
 .claude/

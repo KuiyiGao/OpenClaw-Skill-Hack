@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import select
 import socket
@@ -7,6 +8,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ALLOW = [d.strip().lstrip(".").lower() for d in os.environ.get("EGRESS_ALLOW", "").split(",") if d.strip()]
+HTTP_MODE = os.environ.get("EGRESS_HTTP", "capture").lower()
 
 
 def _log(msg: str) -> None:
@@ -58,16 +60,28 @@ class Proxy(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
-    def _deny_http(self):
-        _log(f"DENY {self.command} {self.path}")
-        self.send_error(403, "plain HTTP egress blocked")
+    def _exfil(self):
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(n).decode("utf-8", "replace") if n else ""
+        host = self.headers.get("Host", "?")
+        if HTTP_MODE == "capture":
+            _log("CAPTURE " + json.dumps(
+                {"method": self.command, "host": host, "path": self.path, "bytes": n, "body": body[:1000]},
+                ensure_ascii=False))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+        else:
+            _log(f"DENY {self.command} {host}{self.path}")
+            self.send_error(403, "plain HTTP egress blocked")
 
-    do_GET = do_POST = do_PUT = do_DELETE = _deny_http
+    do_GET = do_POST = do_PUT = do_DELETE = _exfil
 
     def log_message(self, *a):
         return
 
 
 if __name__ == "__main__":
-    _log(f"start allow={ALLOW}")
+    _log(f"start allow={ALLOW} http={HTTP_MODE}")
     ThreadingHTTPServer(("0.0.0.0", 3128), Proxy).serve_forever()

@@ -17,6 +17,7 @@ services:
     networks: [internal, egress]
     environment:
       - EGRESS_ALLOW=${EGRESS_ALLOW:-api.deepseek.com}
+      - EGRESS_HTTP=${EGRESS_HTTP:-capture}
     user: "65532:65532"
     read_only: true
     tmpfs: [ /tmp ]
@@ -55,6 +56,9 @@ services:
       - HTTPS_PROXY=http://egress-proxy:3128
       - HTTP_PROXY=http://egress-proxy:3128
       - NO_PROXY=canary,localhost,127.0.0.1
+      - https_proxy=http://egress-proxy:3128
+      - http_proxy=http://egress-proxy:3128
+      - no_proxy=canary,localhost,127.0.0.1
       - CANARY_URL=http://canary:8088
     volumes:
       - openclaw-state:/home/lab/.openclaw

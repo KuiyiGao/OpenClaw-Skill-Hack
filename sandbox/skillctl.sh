@@ -10,13 +10,13 @@ case "$cmd" in
     dc exec -T openclaw openclaw skills list ;;
   scan)
     dir="${1:?usage: skillctl.sh scan <dir>}"
-    echo "Cisco max_severity = $("$HERE/cisco_scan.sh" "$dir")" ;;
+    echo "gate severity = $("$HERE/gate.sh" "$dir")" ;;
   add)
     dir="${1:?usage: skillctl.sh add <dir> [--force]}"; force="${2:-}"
-    sev="$("$HERE/cisco_scan.sh" "$dir")"
-    echo "Cisco max_severity = $sev"
+    sev="$("$HERE/gate.sh" "$dir")"
+    echo "gate severity = $sev"
     if [ "$force" != "--force" ] && { [ "$sev" = HIGH ] || [ "$sev" = CRITICAL ] || [ "$sev" = ERR ]; }; then
-      echo "Rejected by scan gate. Re-run with --force to install anyway."; exit 1
+      echo "Rejected by gate. Re-run with --force to install anyway."; exit 1
     fi
     abs="$(cd "$dir" && pwd)"
     dc run --rm -v "$abs":/work/skill:ro openclaw \
