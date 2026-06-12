@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import select
@@ -21,10 +22,22 @@ def allowed(host: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in ALLOW)
 
 
+def blocked_dest(host: str) -> bool:
+    h = host.split(":")[0].strip("[]")
+    try:
+        return not ipaddress.ip_address(h).is_global
+    except ValueError:
+        return False
+
+
 class Proxy(BaseHTTPRequestHandler):
     def do_CONNECT(self):
         host = self.path.split(":")[0]
         port = int(self.path.split(":")[1]) if ":" in self.path else 443
+        if blocked_dest(host):
+            _log(f"DENY CONNECT {self.path} (non-public)")
+            self.send_error(403, "egress blocked")
+            return
         if not allowed(host):
             _log(f"DENY CONNECT {self.path}")
             self.send_error(403, "egress blocked by allowlist")
@@ -64,6 +77,10 @@ class Proxy(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(n).decode("utf-8", "replace") if n else ""
         host = self.headers.get("Host", "?")
+        if blocked_dest(host):
+            _log(f"DENY {self.command} {host}{self.path} (non-public)")
+            self.send_error(403, "egress blocked")
+            return
         if HTTP_MODE == "capture":
             _log("CAPTURE " + json.dumps(
                 {"method": self.command, "host": host, "path": self.path, "bytes": n, "body": body[:1000]},
