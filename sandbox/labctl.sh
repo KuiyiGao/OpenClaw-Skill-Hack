@@ -4,6 +4,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
 CF="$HERE/docker-compose.yml"; ENVF="$HERE/.env"
 export LAB_EVENTS="$HERE/_events/events.jsonl"
 DC(){ docker compose -f "$CF" --env-file "$ENVF" "$@"; }
+_getenv(){ grep -E "^$1=" "$ENVF" 2>/dev/null | head -1 | cut -d= -f2-; }
+_setenv(){ if grep -qE "^$1=" "$ENVF" 2>/dev/null; then tmp="$(mktemp)"; sed "s|^$1=.*|$1=$2|" "$ENVF" > "$tmp" && mv "$tmp" "$ENVF"; else echo "$1=$2" >> "$ENVF"; fi; }
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
@@ -28,12 +30,19 @@ case "$cmd" in
   gate)
     val="${1:?usage: labctl.sh gate <off|scan|custom>}"
     case "$val" in off|scan|custom) ;; *) echo "gate mode must be off|scan|custom"; exit 1 ;; esac
-    if grep -q '^GATE_MODE=' "$ENVF" 2>/dev/null; then
-      sed -i "s/^GATE_MODE=.*/GATE_MODE=$val/" "$ENVF"
-    else
-      echo "GATE_MODE=$val" >> "$ENVF"
-    fi
+    _setenv GATE_MODE "$val"
     echo "gate mode = $val" ;;
+  provider)
+    val="${1:?usage: labctl.sh provider <deepseek|k2>}"
+    case "$val" in deepseek|k2) ;; *) echo "provider must be deepseek|k2"; exit 1 ;; esac
+    P="$(echo "$val" | tr a-z A-Z)"
+    k="$(_getenv ${P}_API_KEY)"; m="$(_getenv ${P}_MODEL)"; b="$(_getenv ${P}_BASE_URL)"
+    a="$(_getenv ${P}_API)"; e="$(_getenv ${P}_EGRESS)"
+    { [ -n "$k" ] && [ -n "$b" ] && [ -n "$m" ]; } || { echo "profile ${P}_* incomplete in $ENVF"; exit 1; }
+    _setenv PROVIDER "$val"; _setenv LLM_API_KEY "$k"; _setenv LLM_MODEL "$m"
+    _setenv LLM_BASE_URL "$b"; _setenv LLM_API "$a"; _setenv EGRESS_ALLOW "$e"
+    case "$k" in sk-REPLACE_ME|"") echo "note: ${P}_API_KEY is still a placeholder -- set it in $ENVF" ;; esac
+    echo "provider = $val (model=$m egress=$e). apply: make oc-down && make oc-up" ;;
   skill)
     sub="${1:?usage: labctl.sh skill <list|scan|add|rm> [args]}"; shift || true
     "$HERE/skillctl.sh" "$sub" "$@" ;;
@@ -55,6 +64,10 @@ outer layer (the supervisor / your judgment)
   ui                        web dashboard on 127.0.0.1:8910 (SSH-tunnel to view)
   exfil                     show captured exfil payloads (honeypot)
   events                    replay recorded events
+
+model provider (switching strategy)
+  provider deepseek|k2      switch active LLM provider + egress; then make oc-down && oc-up
+                            (k2 = Kimi K2 via ifm.ai; fill K2_* in .env from https://ifm.ai/docs)
 
 gate (pre-load filter, your call)
   gate off|scan|custom      off = no filter; scan = Cisco; custom = sandbox/gate_custom.sh

@@ -35,15 +35,26 @@ The same commands run on a remote VM; only the host changes. Full guide incl. Al
 
 ## `.env`
 ```
-LLM_API_KEY=sk-...                       # the only secret in the container
-LLM_MODEL=deepseek-chat
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_API=openai-completions               # openai-completions | openai-responses | anthropic-messages
-EGRESS_ALLOW=api.deepseek.com            # only this domain is reachable
+PROVIDER=deepseek                        # active provider profile: deepseek | k2
+LLM_API_KEY=sk-...                       # active key (the only secret in the container)
+LLM_MODEL / LLM_BASE_URL / LLM_API       # active provider (auto-set by `labctl provider`)
+EGRESS_ALLOW=api.deepseek.com            # only the active provider domain is reachable
 GATE_MODE=scan                           # off | scan | custom
 EGRESS_HTTP=capture                      # capture = honeypot (log payload, fake 200); deny = hard 403
+DEEPSEEK_* / K2_*                        # the two provider profiles (key, model, base url, egress)
 ```
-Switching provider: change all `LLM_*` and `EGRESS_ALLOW`, then `make oc-down && make oc-up`.
+
+## Model provider (DeepSeek / K2 switch)
+DeepSeek is the default. **K2 (Kimi K2 via [ifm.ai](https://ifm.ai/docs))** is a second, separate
+provider profile with a reserved key slot. Each profile carries its own key, model, base URL, and
+egress domain; switching flips the active `LLM_*` **and** the egress allowlist (least privilege --
+only the active provider's domain is reachable).
+```bash
+# fill the K2 slot in sandbox/.env from https://ifm.ai/docs (key, exact model id, base url)
+make oc-provider P=k2          # or: ./sandbox/labctl.sh provider k2
+make oc-down && make oc-up     # apply
+make oc-provider P=deepseek    # switch back
+```
 
 ## Safety layer (egress lock)
 1. The `openclaw` container is on an internal-only network -- no direct internet, no metadata route.
