@@ -69,16 +69,34 @@ GATE_MODE=scan               off | scan | custom
 EGRESS_HTTP=capture          capture = honeypot (log payload, fake 200); deny = hard 403
 ```
 
-## Custom gate contract
+## Extension points (reserved interfaces)
 
-Set `GATE_MODE=custom`, then edit `sandbox/gate_custom.sh`. It receives one argument,
-the skill directory, and must print exactly one token on stdout:
+The platform is meant to grow along three axes. None require touching the core.
 
+### 1. Add a skill / case
+A skill is a directory under `sandbox/skills/` containing `SKILL.md` (YAML frontmatter:
+`name`, `description`, `version`) plus optional bundled scripts (the payload). For the console's
+experiment model, ship a **pair** named `<case>-safe` and `<case>-malicious` (same surface, only
+the payload differs); the web console auto-discovers `<case>`. Base every case on a real incident.
 ```
-NONE | INFO | LOW | MEDIUM | HIGH | CRITICAL
+sandbox/skills/<case>-safe/SKILL.md
+sandbox/skills/<case>-malicious/SKILL.md  (+ collect.py / setup.py = the payload)
 ```
+No code change is needed -- `gate.sh`, `skillctl.sh`, and the console all operate on any pair.
 
-`HIGH`, `CRITICAL`, or `ERR` cause the loader to reject the skill (override with `--force`).
+### 2. Add a defense gate
+Set `GATE_MODE=custom`, then edit `sandbox/gate_custom.sh`. It receives one argument, the skill
+directory, and must print exactly one token: `NONE | INFO | LOW | MEDIUM | HIGH | CRITICAL`.
+`HIGH`, `CRITICAL`, or `ERR` reject the skill (override with `--force`). `GATE_MODE=scan` uses the
+built-in Cisco scanner; `off` disables the gate.
+
+### 3. Extend the firewall (egress policy)
+Edit `sandbox/egress_policy.py`, which exports `decide(phase, host, method, body)`:
+- `phase` is `"connect"` (HTTPS) or `"http"` (plain HTTP); `body` is the request body for `"http"`.
+- Return `"deny"` or `"capture"` to override the default decision, or `None` to fall back to the
+  built-in allowlist + honeypot. The hook can only make egress **stricter**, never widen it.
+- It is mounted read-only into the proxy, so editing it + `make oc-down && make oc-up` applies the
+  change (no rebuild). Example use: DLP (deny when a known secret pattern appears in `body`).
 
 ## Web dashboard over SSH
 

@@ -2,7 +2,7 @@ SB := sandbox
 LC := ./$(SB)/labctl.sh
 MSG ?= Introduce yourself in one sentence.
 
-.PHONY: help oc-build oc-up oc-down oc-ask oc-watch oc-ui oc-exfil oc-events oc-verify oc-skills oc-shell oc-provider
+.PHONY: help oc-build oc-up oc-down oc-ask oc-watch oc-ui oc-exfil oc-events oc-verify oc-skills oc-shell oc-provider oc-console
 
 help:
 	@$(LC) help
@@ -29,6 +29,9 @@ oc-ask:
 
 oc-provider:
 	@$(LC) provider "$(P)"
+
+oc-console:
+	@python3 $(SB)/console.py
 
 oc-watch:
 	@$(LC) watch

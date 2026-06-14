@@ -14,10 +14,12 @@ PREFIX = re.compile(r"^\s*([\w.-]+)\s*\|\s?(.*)$")
 
 
 def _now():
+    # Wall-clock HH:MM:SS stamp for a human-readable event time.
     return datetime.now().strftime("%H:%M:%S")
 
 
 def _find(o, key):
+    # Recursively find the first value for `key` anywhere in a nested dict/list (agent JSON is deep).
     if isinstance(o, dict):
         if key in o:
             return o[key]
@@ -34,6 +36,7 @@ def _find(o, key):
 
 
 def emit(source, kind, verdict, detail):
+    # Append one structured event to events.jsonl (the machine-readable research record) and return it.
     ev = {"ts": time.time(), "time": _now(), "source": source, "kind": kind, "verdict": verdict, "detail": detail}
     os.makedirs(os.path.dirname(EVENTS), exist_ok=True)
     with open(EVENTS, "a") as f:
@@ -42,15 +45,18 @@ def emit(source, kind, verdict, detail):
 
 
 def show(ev):
+    # Print one event as an aligned line to the terminal.
     print("%s  %-8s %-7s %-9s %s" % (ev["time"], ev["source"], ev["kind"], ev["verdict"], ev["detail"]))
     sys.stdout.flush()
 
 
 def log(source, kind, verdict, detail):
+    # Persist and print an event in one call.
     show(emit(source, kind, verdict, detail))
 
 
 def classify(line):
+    # Map one raw container-log line to (source, kind, verdict, detail), or None if irrelevant.
     s = line.rstrip("\n")
     m = PREFIX.match(s)
     body = m.group(2) if m else s
@@ -83,6 +89,7 @@ def classify(line):
 
 
 def run_stream():
+    # stdin = live container logs; classify each line and record/print it (used by `labctl watch`).
     for line in sys.stdin:
         c = classify(line)
         if c:
@@ -90,6 +97,7 @@ def run_stream():
 
 
 def run_agent():
+    # stdin = one `openclaw agent --json` result; record per-step trace + print the final answer.
     raw = sys.stdin.read()
     i = raw.find("{")
     obj = None
@@ -113,6 +121,7 @@ def run_agent():
 
 
 def _load(n=400):
+    # Load the last n recorded events from events.jsonl.
     try:
         with open(EVENTS) as f:
             lines = f.readlines()[-n:]
@@ -128,11 +137,13 @@ def _load(n=400):
 
 
 def run_tail():
+    # Replay recent recorded events to the terminal.
     for e in _load(200):
         show(e)
 
 
 def run_exfil():
+    # Print only the captured exfil / honeypot hits (what a skill tried to steal; nothing left).
     caps = [e for e in _load(2000) if e.get("kind") in ("capture", "hit")]
     if not caps:
         print("no exfil captured yet.")
@@ -143,6 +154,7 @@ def run_exfil():
 
 
 def _render(evs):
+    # Build the read-only auto-refreshing HTML dashboard from a list of events.
     rows = []
     for e in reversed(evs):
         c = COLOR.get(e.get("verdict"), "#888")
@@ -163,6 +175,7 @@ def _render(evs):
 
 
 def run_serve():
+    # Serve the read-only dashboard on 127.0.0.1:8910 (view over an SSH tunnel on a VM).
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     bind = os.environ.get("LAB_UI_BIND", "127.0.0.1")
     port = int(os.environ.get("LAB_UI_PORT", "8910"))

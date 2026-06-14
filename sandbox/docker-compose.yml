@@ -18,6 +18,8 @@ services:
     environment:
       - EGRESS_ALLOW=${EGRESS_ALLOW:-api.deepseek.com}
       - EGRESS_HTTP=${EGRESS_HTTP:-capture}
+    volumes:
+      - ./egress_policy.py:/app/sandbox/egress_policy.py:ro
     user: "65532:65532"
     read_only: true
     tmpfs: [ /tmp ]

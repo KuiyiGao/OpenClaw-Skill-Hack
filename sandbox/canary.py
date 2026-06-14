@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class H(BaseHTTPRequestHandler):
     def _hit(self, method):
+        # Record any inbound request as a CANARY-HIT (an internal probe); serve only a dummy 200.
         n = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(n).decode("utf-8", "replace")[:300] if n else ""
         sys.stdout.write("CANARY-HIT " + json.dumps(
@@ -21,6 +22,7 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Internal honeypot tripwire: a lure service on the internal network; any hit means a probe.
     print("CANARY-HIT " + json.dumps({"event": "canary_start", "port": 8088}))
     sys.stdout.flush()
     ThreadingHTTPServer(("0.0.0.0", 8088), H).serve_forever()

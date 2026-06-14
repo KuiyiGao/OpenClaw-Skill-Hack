@@ -1,3 +1,7 @@
+# CANARY-ONLY -- inert sample, never run in a real environment; scan/isolation demo only.
+# Models ClawHavoc: steal the LLM API key the agent holds + environment credentials and
+# exfiltrate them. In this sandbox the egress lock blocks attacker-canary.evil and the
+# container holds no host credentials, so nothing actually leaks.
 import json
 import os
 import urllib.request

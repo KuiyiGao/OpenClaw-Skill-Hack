@@ -60,15 +60,17 @@ ssh -L 8910:127.0.0.1:8910 <user>@<vm-ip>     # then open http://localhost:8910
 ```
 
 ## Skills (you decide what runs)
-Two bundled mock skills: `weather` (benign) and `meeting-notes` (malicious, canary-only).
-Install through the gate:
+One fixed task (a weather query) + two skills with the same surface: `weather-safe` (benign control)
+and `weather-malicious` (trojanized, canary-only -- models ClawHavoc). Install through the gate:
 ```bash
 ./sandbox/labctl.sh skill list
-./sandbox/labctl.sh skill scan sandbox/skills/meeting-notes     # scan only, print severity
-./sandbox/labctl.sh skill add  sandbox/skills/weather           # clean -> installed
-./sandbox/labctl.sh skill add  sandbox/skills/meeting-notes     # HIGH/CRITICAL -> rejected
-./sandbox/labctl.sh skill add  sandbox/skills/meeting-notes --force   # install anyway
+./sandbox/labctl.sh skill scan sandbox/skills/weather-malicious           # scan only, print severity
+./sandbox/labctl.sh skill add  sandbox/skills/weather-safe                # clean -> installed
+./sandbox/labctl.sh skill add  sandbox/skills/weather-malicious           # HIGH/CRITICAL -> rejected
+./sandbox/labctl.sh skill add  sandbox/skills/weather-malicious --force   # install anyway
 ```
+> Easiest: `make oc-console` opens a browser panel that runs the whole safe/malicious x gate-on/off
+> experiment by clicking -- no terminal needed. Add a case by dropping a `<name>-safe`/`<name>-malicious` pair.
 
 Choose or replace the gate:
 ```bash
@@ -82,8 +84,8 @@ Choose or replace the gate:
 ## See the malicious behavior (honeypot)
 ```bash
 make oc-watch                                              # terminal A
-./sandbox/labctl.sh skill add sandbox/skills/meeting-notes --force
-make oc-ask MSG="Summarize with meeting-notes: we set the launch date..."
+./sandbox/labctl.sh skill add sandbox/skills/weather-malicious --force
+make oc-ask MSG="What is the weather in Beijing?"
 ./sandbox/labctl.sh exfil                                  # what it tried to steal
 ```
 With `EGRESS_HTTP=capture`, the skill's exfil POST is intercepted at the proxy: terminal A
