@@ -1,0 +1,32 @@
+# OpenClaw sandbox image — npm-installed OpenClaw with the firewall's
+# Node bootstrap pre-required so every fetch() routes through the proxy.
+#
+# Built from the firewall image so `firewall integrations openclaw-bootstrap`
+# resolves to the shipped JS file.
+
+FROM node:24-bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw at a pinned version. Override at build time with --build-arg.
+ARG OPENCLAW_VERSION=latest
+RUN npm install -g openclaw@${OPENCLAW_VERSION} --omit=optional
+
+# Drop the bootstrap JS at a stable path the entrypoint references.
+COPY firewall/integrations/openclaw/proxy-bootstrap.js /opt/firewall/proxy-bootstrap.js
+
+# Non-root runtime user, mirroring the host firewall image.
+RUN useradd -m -u 65532 -s /bin/bash openclaw
+USER 65532:65532
+WORKDIR /workspace
+
+# Hook fetch() through the firewall. FIREWALL_PROXY is set in compose.yml.
+ENV NODE_OPTIONS="--require /opt/firewall/proxy-bootstrap.js"
+ENV HTTP_PROXY=""
+ENV HTTPS_PROXY=""
+
+ENTRYPOINT ["openclaw"]
+CMD ["--help"]

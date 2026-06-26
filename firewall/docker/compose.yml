@@ -1,0 +1,63 @@
+# Minimal firewall stack:
+#   firewall   — egress proxy (8080) + canary tripwire (8088)
+#   openclaw   — *optional* sandboxed agent; uncomment and set OPENCLAW_IMAGE
+#                or replace with your own agent service that routes traffic
+#                through `HTTP_PROXY=http://firewall:8080`.
+#
+# `events.jsonl` is a named volume so the host's `firewall panel` can tail it.
+
+services:
+  firewall:
+    build:
+      context: ../..
+      dockerfile: firewall/docker/Dockerfile
+    image: agent-skill-firewall:latest
+    ports:
+      - "127.0.0.1:8080:8080"   # HTTP/CONNECT proxy
+      - "127.0.0.1:8088:8088"   # canary
+    volumes:
+      - firewall_state:/firewall/.state
+    environment:
+      XDG_STATE_HOME: /firewall/.state
+    networks: [firewall_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8080),2).close()"]
+      interval: 5s
+      timeout: 2s
+
+  # OpenClaw sandbox. The image (firewall/docker/Dockerfile.openclaw) bakes in
+  # the proxy bootstrap so OpenClaw's native fetch transits the firewall —
+  # HTTP_PROXY env vars alone are not enough (undici ignores them; see README).
+  #
+  # Comment this block out if you only want the firewall standalone, or
+  # replace with your own agent image that uses NODE_OPTIONS='--require
+  # /opt/firewall/proxy-bootstrap.js'.
+  openclaw:
+    profiles: ["agent"]            # opt-in: `docker compose --profile agent up`
+    build:
+      context: ../..
+      dockerfile: firewall/docker/Dockerfile.openclaw
+      args:
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-latest}
+    image: openclaw-firewalled:latest
+    depends_on:
+      firewall:
+        condition: service_healthy
+    environment:
+      FIREWALL_PROXY: http://firewall:8080
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set in your shell, never in the file}
+    volumes:
+      - ./workspace:/workspace:rw
+    networks: [firewall_net]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges"]
+    stdin_open: true
+    tty: true
+    command: ["--help"]
+
+volumes:
+  firewall_state: {}
+
+networks:
+  firewall_net:
+    driver: bridge

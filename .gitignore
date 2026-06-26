@@ -1,0 +1,55 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+build/
+dist/
+*.whl
+
+# ---------- Editors / OS ----------
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# ---------- pytest / coverage ----------
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------- Secrets ----------
+.env
+.env.local
+*.pem
+sandbox/.env
+
+# ---------- Private dev tree (never publish) ----------
+# These directories carry the research dataset, the stored experiment
+# results, the internal docs, and the slide-deck materials. They are
+# kept LOCAL — they exist on the contributor's machine but are not part
+# of the public pip package.
+/data/
+/configs/
+/deploy/
+# Allow git to descend into docs/ but ignore everything except the
+# three files that document the package itself.
+/docs/*
+!/docs/code.tex
+!/docs/code.pdf
+!/docs/workflow-design.md
+
+/reports/
+/scripts/
+/sandbox/
+/console_archive/
+/src/
+/.claude/
+
+# ---------- Firewall runtime state ----------
+# `firewall start` writes events to the user's XDG state dir, NOT into the
+# repo. The pattern below is a safety net in case someone redirects it.
+**/events.jsonl
+**/session.json
