@@ -1,0 +1,352 @@
+% !TEX engine = xelatex
+% Compile with:  tectonic -X compile docs/code.tex    (recommended)
+%           or:  xelatex docs/code.tex
+%
+% Authored for XeLaTeX (Unicode + future Asian-locale extensibility); kept
+% engine-portable so any TeX install can rebuild the PDF without changes.
+% The `make code-pdf` target invokes tectonic; the Makefile is the single
+% source of truth for the build command.
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\definecolor{ink}{HTML}{1F1F1F}
+\definecolor{slate}{HTML}{53606E}
+\definecolor{rule}{HTML}{D6D6D6}
+\definecolor{good}{HTML}{4F6B52}
+\definecolor{bad}{HTML}{9E5B4F}
+\definecolor{codebg}{HTML}{F4F4F4}
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small\color{ink},
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{slate}\bfseries,
+  commentstyle=\color{slate}\itshape,
+  stringstyle=\color{good},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{rule},
+  framesep=6pt,
+  xleftmargin=8pt,
+  language=Python,
+}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable, skins}
+\newtcolorbox{tip}{colback=codebg, colframe=slate, left=8pt, right=8pt, top=4pt,
+  bottom=4pt, sharp corners, boxrule=0.5pt, breakable, fonttitle=\bfseries,
+  title=Guide for coding large systems}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=slate, urlcolor=slate}
+\usepackage{titlesec}
+\titleformat*{\section}{\Large\bfseries\color{ink}}
+\titleformat*{\subsection}{\large\bfseries\color{ink}}
+\titleformat*{\subsubsection}{\bfseries\color{slate}}
+
+\title{\bfseries Agent Skill Firewall \\ \large Source-Code Companion (\texttt{code.pdf})}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent
+This document accompanies the \texttt{agent-skill-firewall} pip package. Each
+section describes one source file: its purpose, the public API, the design
+choices behind it, and the lessons it embodies for building larger
+systems. Sidebars marked \emph{Guide for coding large systems} extract
+those lessons explicitly so the document doubles as a teaching reference.
+
+\tableofcontents
+\bigskip\hrule\bigskip
+
+\section{Package layout (one paragraph)}
+
+\noindent\texttt{firewall/} is the public package. \texttt{cli.py} is the
+\texttt{firewall} command-line entry point. \texttt{config.py} owns the
+TOML configuration -- the firewall's policy lives here, not in the code,
+which is what makes the system non-empirical. \texttt{runtime/} contains
+the L2 verifier and the L1 containment substrate (egress proxy + canary
++ supervisor + events emitter). \texttt{gate/} contains the L0 static
+scanner. \texttt{skills/} is the framework-agnostic skill discoverer.
+\texttt{panel/} is the Textual TUI. \texttt{docker/} ships the minimal
+compose stack. \texttt{examples/} bundles two didactic skills used by
+the tests. Tests live in \texttt{tests/unit/}; a minimal experiment
+harness lives in \texttt{experiment\_minimal/}.
+
+\section{\texttt{firewall/config.py} -- the policy lives here}
+
+\subsection{What it does}
+Loads, validates, and writes the TOML configuration file at
+\texttt{\textasciitilde/.config/firewall/config.toml} (XDG; macOS uses
+\texttt{\textasciitilde/Library/Application Support/firewall/}). The
+default config is held as a literal string so a fresh install can run
+without any external state.
+
+\subsection{Key dataclasses}
+\begin{itemize}
+  \item \texttt{DriverConfig} -- which LLM the runtime calls when it
+    needs a tie-breaker judge. The \emph{name} of the env var is stored
+    in \texttt{api\_key\_env}; the key itself is read at runtime, never
+    written to disk.
+  \item \texttt{PolicyConfig} -- one of three modes:
+    \texttt{strict}, \texttt{balanced} (default), \texttt{observe}.
+  \item \texttt{EgressConfig} -- \texttt{allow\_hosts} and
+    \texttt{deny\_hosts}, both wildcard-suffix matched
+    (\texttt{*.example.com}).
+  \item \texttt{SecretsConfig} -- filesystem paths and env-var names
+    treated as SECRET sources for taint analysis.
+  \item \texttt{JudgeConfig} -- a \emph{minimal} regex list of refusal
+    and compliance patterns. The user is expected to extend these in
+    config without touching the source.
+  \item \texttt{TaintConfig} -- the six pattern lists that drive L2's
+    classifier (secret sources, network sinks, exec sinks, exfil host
+    substrings, pseudo-TLDs). Every signal the runtime uses is named
+    here.
+  \item \texttt{Config} -- the top-level container with three
+    convenience methods (\texttt{host\_allowed}, \texttt{host\_denied},
+    \texttt{is\_hostile\_host}) that encapsulate the wildcard match.
+\end{itemize}
+
+\subsection{Notable functions}
+\begin{lstlisting}
+def load_config(path=None) -> Config:
+    """Load TOML from disk, applying defaults for any missing keys."""
+
+def init_default(path=None, *, overwrite=False) -> Path:
+    """Write the bundled default TOML if no file exists."""
+\end{lstlisting}
+
+\begin{tip}
+\textbf{Push policy out of code.} Patterns, thresholds, and allowlists
+should read from a user-editable file. Code that \emph{decides} should
+not \emph{also} carry the decision data. Here, the entire
+\texttt{TaintConfig} block is data; the verifier in
+\texttt{runtime/firewall.py} only knows how to read it.
+\end{tip}
+
+\section{\texttt{firewall/runtime/firewall.py} -- the L2 verifier}
+
+\subsection{What it does}
+Given an intent envelope (what the skill declared) and the evidence from
+one run (what the skill did), returns an \texttt{IARVerdict}. About 250
+lines, policy-free.
+
+\subsection{Key functions}
+\begin{lstlisting}
+def build_intent_envelope(skill: dict) -> dict:
+    """Derive {name, description, allowed_tools, allow_hosts}."""
+
+def analyze_iar(evidence, envelope, cfg, *, honeypot_aware=False) -> IARVerdict:
+    """Score one run's evidence. Returns a verdict ladder:
+        BENIGN     -- in-intent only
+        SUSPICIOUS -- divergence, no confirmation
+        MALICIOUS  -- divergence confirmed by harmful result
+    """
+
+def recommend_enforcement(verdict) -> dict:
+    """Pure data: 'none' | 'tighten_egress' | 'quarantine'."""
+\end{lstlisting}
+
+\subsection{Five invariants}
+The verifier preserves five invariants regardless of user config:
+\begin{enumerate}
+  \item \textbf{Cross-plane taint.} A secret read on the tool-call
+    plane AND an out-of-policy egress on the network plane in the same
+    run = malicious, regardless of how innocent the destination looks
+    alone.
+  \item \textbf{Pre-scan defer.} Only \texttt{CRITICAL} static findings
+    hard-block; \texttt{HIGH}/\texttt{MEDIUM} defer to the L2 layer.
+  \item \textbf{Detection / containment separation.} In detector mode
+    (\texttt{honeypot\_aware=False}), honeypot capture and canary hits
+    are recorded under \texttt{containment} but excluded from the
+    verdict. Reaching the honeypot means the detector already failed.
+  \item \textbf{Unknown is not guilty.} An unfamiliar host with no
+    cross-plane signal is classified \texttt{low}, not
+    \texttt{suspicious}. Only taint can promote it.
+  \item \textbf{IAR three-plane shape.} \texttt{intent} (envelope),
+    \texttt{action} (tool calls + egress \emph{attempts}, never bodies),
+    \texttt{result} (taint flow / containment). The verifier never
+    reads response bodies.
+\end{enumerate}
+
+\begin{tip}
+\textbf{State your invariants in writing.} If you cannot list the things
+a security module must do regardless of configuration, it will drift.
+Invariants belong at the top of the file and in named tests; if a
+refactor breaks an invariant test, that is the refactor's problem.
+\end{tip}
+
+\section{\texttt{firewall/runtime/egress\_proxy.py} -- L1 containment}
+
+\subsection{What it does}
+A tiny HTTP/HTTPS forward proxy. Allowed hosts pass through, denied or
+hostile hosts get \texttt{403}, anything else is \emph{captured}
+(short-circuited with a \texttt{204} after the body is recorded as
+evidence). Every decision is emitted as a JSONL event the supervisor
+and the panel consume.
+
+\subsection{Why this is L1 and not L2}
+Containment captures \emph{do not} promote a verdict on their own; that
+discipline lives in the verifier (invariant 3). Keeping the proxy
+"dumb" -- it only knows the allow/deny lists in \texttt{cfg.egress} --
+means a user can audit the containment behaviour without reading any
+detection logic.
+
+\begin{tip}
+\textbf{Containment and detection belong in different files.} The egress
+proxy can be replaced by an nftables rule, an Envoy sidecar, or a host
+firewall; nothing in \texttt{runtime/firewall.py} cares. The events
+emitter is the seam.
+\end{tip}
+
+\section{\texttt{firewall/runtime/canary.py} -- honeypot tripwire}
+
+A 28-line HTTP server on \texttt{127.0.0.1:8088}. Any inbound request
+is logged as a \texttt{CANARY-HIT}. The L2 verifier records this under
+\texttt{containment} only.
+
+\section{\texttt{firewall/runtime/supervisor.py} -- log $\rightarrow$ evidence}
+
+\subsection{What it does}
+Parses the proxy's and canary's log lines into typed \texttt{Event}
+records, then aggregates a list of events into the dict shape
+\texttt{analyze\_iar} expects. Keeps the regex set out of the verifier.
+
+\section{\texttt{firewall/runtime/events.py} -- JSONL emitter}
+
+\subsection{What it does}
+A thread-safe \texttt{EventEmitter} that appends one JSON object per
+line to \texttt{events.jsonl}, with size-based rotation. This is the
+seam between every L1/L2 component and the panel; new event kinds can
+be added without breaking readers.
+
+\begin{tip}
+\textbf{Make one wire format the contract.} The events file is the
+firewall's wire format. The proxy writes it, the verifier writes it,
+the panel reads it, and the experiment harness reads it. New
+components fit in by writing or reading the same JSONL; no other
+coupling needed.
+\end{tip}
+
+\section{\texttt{firewall/gate/static\_scanner.py} -- L0}
+
+\subsection{What it does}
+A small static scanner with three rules: hidden-instruction HTML
+comments in \texttt{SKILL.md}, shell-fetch lines in code, and
+hostile-host literals (from \texttt{cfg.taint.exfil\_host\_substrings}).
+Returns \texttt{Finding} records with a severity; never decides
+install / no-install on its own (the prescan rule lives in the
+verifier, invariant 2).
+
+\section{\texttt{firewall/skills/discover.py} -- framework-agnostic loader}
+
+\subsection{What it does}
+Walks the directories every agent framework uses for skills
+(\texttt{.claude/skills/}, \texttt{.openclaw/skills/},
+\texttt{.cursor/skills/}, \texttt{.opencode/skills/}, \texttt{skills/})
+and parses each \texttt{SKILL.md} into a \texttt{Skill} dataclass.
+Optionally falls back to PyYAML for the manifest body; the built-in
+parser handles the small subset that real skills use.
+
+\subsection{Why this matters}
+The Agent Skill format converges across frameworks: a directory whose
+name matches a \texttt{name} field in a single text manifest. Hooking
+at the filesystem prefix means the firewall is uniform across
+Anthropic SDK, Claude Code, OpenClaw, Cursor, OpenCode, etc.
+
+\begin{tip}
+\textbf{Hook at the lowest common denominator.} If multiple frameworks
+agree on the file-system layout, that is your interface, not the agent
+API of any one of them. The number of agents will grow; the file-system
+semantics will not.
+\end{tip}
+
+\section{\texttt{firewall/panel/tui.py} -- live Textual panel}
+
+A four-region grid: passed/blocked table, session stats, API usage,
+and a tailing log. Reads \texttt{events.jsonl} only -- no firewall
+enforcement of its own. Keyboard: \texttt{q} quit, \texttt{p} pause,
+\texttt{c} clear table.
+
+\section{\texttt{firewall/cli.py} -- subcommands}
+
+The Typer-based front door. Subcommands:
+\texttt{config init/show/path}, \texttt{scan}, \texttt{watch},
+\texttt{start} (\texttt{--mode host|docker}), \texttt{stop},
+\texttt{panel}, \texttt{skills}. No subcommand carries policy; each
+delegates to its module.
+
+\section{Tests (\texttt{tests/unit/})}
+
+Four small files:
+\begin{itemize}
+  \item \texttt{test\_firewall\_invariants.py} -- one test per
+    invariant from the L2 verifier (a sixth test pins the
+    pseudo-TLD escalation).
+  \item \texttt{test\_skill\_discovery.py} -- frontmatter parser +
+    isolated-dir discovery.
+  \item \texttt{test\_supervisor.py} -- regex set for the egress /
+    canary log lines.
+  \item \texttt{test\_static\_scanner.py} -- the canary example flags
+    the hostile-host literal; the safe example is clean.
+\end{itemize}
+
+\begin{tip}
+\textbf{One test per invariant, named after it.} A failing test for the
+cross-plane-taint rule should literally read
+\texttt{test\_cross\_plane\_taint\_is\_malicious}. Invariant tests double
+as documentation.
+\end{tip}
+
+\section{Docker (\texttt{firewall/docker/})}
+
+A minimal image (\texttt{python:3.11-slim}, non-root, read-only
+root-fs in compose) that runs the egress proxy on \texttt{8080} and
+the canary on \texttt{8088} via a 14-line \texttt{entrypoint.sh}. The
+compose file ships a commented \texttt{openclaw} service stub so the
+user can wire any agent that obeys \texttt{HTTP\_PROXY}.
+
+\section{Experiment harness (\texttt{experiment\_minimal/})}
+
+Two files: \texttt{run.py} loops over a skills folder and prints a CSV
+of \texttt{(skill, static\_severity, runtime\_verdict, score, reason)};
+\texttt{panel.html} is a 90-line browser dashboard that polls
+\texttt{events.jsonl}.
+
+\section{Agent integration commands (\texttt{firewall hook}, \texttt{firewall doctor})}
+
+\texttt{firewall hook openclaw} prints the env vars + per-provider
+config commands to route OpenClaw's HTTP egress through the proxy on
+\texttt{127.0.0.1:8080}. Verified against \texttt{openclaw 2026.6.10}:
+\texttt{HTTP\_PROXY}, \texttt{HTTPS\_PROXY}, and \texttt{ALL\_PROXY} are
+honoured at the undici layer and catch both OpenClaw's own HTTP and
+any subprocess spawned by skills (curl, pip, npm). For model-provider
+calls specifically, \texttt{models.providers.<id>.request.proxy.mode}
+and \texttt{.proxyUrl} pin the path. The same command supports
+\texttt{claude-code}, \texttt{cursor}, and \texttt{generic} targets.
+
+\texttt{firewall doctor} runs a six-step health check: config parses,
+the configured API-key env var is set, the proxy and canary ports are
+free, and the two optional tools (\texttt{docker},
+\texttt{tectonic}) are reachable. Exit status is \texttt{0} on success
+and \texttt{1} if any required check fails. Pair it with
+\texttt{firewall config show} when triaging a fresh install.
+
+\section*{Closing notes on system design}
+
+Three habits this codebase encodes:
+\begin{enumerate}
+  \item \textbf{Push policy out of code.} The runtime decides; the
+    config carries the data it decides over. Patterns rot; code that
+    reads them does not.
+  \item \textbf{Separate detection and containment.} They have different
+    failure modes. Mixing them produces a system you cannot audit when
+    the user disagrees with a verdict.
+  \item \textbf{One wire format is the contract.} An append-only JSONL
+    is the seam. Components plug in by reading or writing it.
+\end{enumerate}
+
+\end{document}

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>firewall panel (v2 — browser)</title>
+<style>
+  body { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: #fff;
+         color: #1f1f1f; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 12px; letter-spacing: 1px; color: #53606e; }
+  .grid { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
+  .card { border: 1px solid #d6d6d6; border-radius: 6px; padding: 12px 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #53606e; font-weight: 600; border-bottom: 1px solid #d6d6d6; padding: 6px 4px; }
+  td { padding: 4px 4px; border-bottom: 1px solid #f0f0f0; }
+  .pass  { color: #4f6b52; font-weight: 700; }
+  .defer { color: #a98447; font-weight: 700; }
+  .block { color: #9e5b4f; font-weight: 700; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0; }
+  .stat b { color: #1f1f1f; }
+  .hint { color: #8c8c8c; font-size: 12px; margin-top: 8px; }
+  #log { font-size: 12px; color: #565656; max-height: 280px; overflow-y: auto; }
+  #log div { padding: 2px 0; border-bottom: 1px solid #f5f5f5; }
+</style>
+<body>
+  <h1>FIREWALL PANEL — v2 (browser)</h1>
+  <p class="hint">Reads events.jsonl from your firewall state dir. Set <code>?events=…</code> in the URL to override.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>passed / blocked</h3>
+      <table id="rows">
+        <thead><tr><th>time</th><th>skill</th><th>verdict</th><th>reason</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>session</h3>
+      <div class="stat"><span>seen</span><b id="seen">0</b></div>
+      <div class="stat"><span>allowed</span><b class="pass" id="allowed">0</b></div>
+      <div class="stat"><span>deferred</span><b class="defer" id="deferred">0</b></div>
+      <div class="stat"><span>blocked</span><b class="block" id="blocked">0</b></div>
+      <h3 style="margin-top: 14px;">api usage</h3>
+      <div class="stat"><span>calls</span><b id="calls">0</b></div>
+      <div class="stat"><span>tokens in</span><b id="tin">0</b></div>
+      <div class="stat"><span>tokens out</span><b id="tout">0</b></div>
+      <div class="stat"><span>est. cost</span><b id="cost">$0.00</b></div>
+      <h3 style="margin-top: 14px;">recent events</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+<script>
+const params = new URLSearchParams(location.search);
+const eventsPath = params.get("events") || "events.jsonl";
+const state = { seen:0, allowed:0, deferred:0, blocked:0, calls:0, tin:0, tout:0, cost:0, rows:[] };
+
+async function fetchEvents() {
+  try {
+    const r = await fetch(eventsPath, { cache: "no-store" });
+    if (!r.ok) return;
+    const text = await r.text();
+    const lines = text.trim().split("\n");
+    // simple full-reread; reset and rehydrate. For large logs the user can
+    // serve a tailed slice instead.
+    Object.assign(state, { seen:0, allowed:0, deferred:0, blocked:0, calls:0, tin:0, tout:0, cost:0, rows:[] });
+    const recent = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.kind === "verdict") {
+        state.seen++;
+        const v = (ev.verdict || "").toLowerCase();
+        if (v === "benign") state.allowed++;
+        else if (v === "malicious") state.blocked++;
+        else state.deferred++;
+        state.rows.push(ev);
+      } else if (ev.kind === "usage") {
+        state.calls += +(ev.calls || 1);
+        state.tin += +(ev.tokens_in || 0);
+        state.tout += +(ev.tokens_out || 0);
+      }
+      recent.push(ev);
+    }
+    render(recent);
+  } catch (e) {}
+}
+
+function render(recent) {
+  document.getElementById("seen").textContent = state.seen;
+  document.getElementById("allowed").textContent = state.allowed;
+  document.getElementById("deferred").textContent = state.deferred;
+  document.getElementById("blocked").textContent = state.blocked;
+  document.getElementById("calls").textContent = state.calls;
+  document.getElementById("tin").textContent = state.tin.toLocaleString();
+  document.getElementById("tout").textContent = state.tout.toLocaleString();
+  document.getElementById("cost").textContent = state.cost ? `$${state.cost.toFixed(4)}` : "$ —";
+  const tbody = document.querySelector("#rows tbody"); tbody.innerHTML = "";
+  for (const ev of state.rows.slice(-200).reverse()) {
+    const tr = document.createElement("tr");
+    const t = (ev.ts || "").slice(11,19);
+    const v = (ev.verdict || "").toLowerCase();
+    const cls = v === "benign" ? "pass" : v === "malicious" ? "block" : "defer";
+    const label = v === "benign" ? "PASS" : v === "malicious" ? "BLOCK" : "DEFER";
+    tr.innerHTML = `<td>${t}</td><td>${ev.skill||"—"}</td><td class="${cls}">${label}</td><td>${ev.reason||"-"}</td>`;
+    tbody.appendChild(tr);
+  }
+  const log = document.getElementById("log"); log.innerHTML = "";
+  for (const ev of recent.slice(-50).reverse()) {
+    const div = document.createElement("div");
+    div.textContent = `${(ev.ts||"").slice(11,19)}  ${ev.kind}  ${ev.host||""}  ${ev.message||ev.path||""}`;
+    log.appendChild(div);
+  }
+}
+
+fetchEvents();
+setInterval(fetchEvents, 1500);
+</script>
+</body>
