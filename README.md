@@ -37,7 +37,7 @@ three verdicts. Rules live in a TOML you can `diff`.
 ## Get started in 3 steps
 
 ```bash
-pip install agent-skill-firewall     # 1. install
+pip install git+https://github.com/KuiyiGao/OpenClaw-Skill-Hack    # 1. install
 firewall config init && firewall start   # 2. run the firewall (proxy + canary)
 eval "$(firewall hook hermes)"       # 3. route your agent — then run it as usual
 ```
