@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Turn the local ICLR paper folder into the AgentSkillsHack-ICLR-Paper repo and push it.
-# Usage: bash bootstrap_paper_repo.sh [PAPER_DIR] [REMOTE_URL]
+# Usage: [SEED=1] bash bootstrap_paper_repo.sh [PAPER_DIR] [REMOTE_URL]
+# SEED=1 pushes only top-level notes, .handoff/ (transcripts, inventory) and tooling.
 # Safe to re-run: it never touches your working files, only git metadata and .gitignore.
 set -euo pipefail
 
@@ -81,7 +82,38 @@ if ! git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
   git update-ref -d HEAD 2>/dev/null || true
 fi
 git rm -r -q --cached . >/dev/null 2>&1 || true
-git add -A
+
+# Inventory so the cloud session can decide what else belongs in the repo.
+mkdir -p .handoff
+{
+  echo "# Workspace inventory ($(date +%F))"; echo
+  echo "## Directories (depth 1-2, largest first): MB, files"; echo '```'
+  find . -mindepth 1 -maxdepth 2 -type d -not -path './.git*' -not -path '*/external*' 2>/dev/null | while read -r d; do
+    printf "%8d MB %7d files  %s\n" "$(( $(du -sk "$d" | cut -f1) / 1024 ))" "$(find "$d" -type f 2>/dev/null | wc -l)" "${d#./}"
+  done | sort -rn | head -150
+  echo '```'; echo
+  echo "## Top-level files"; echo '```'; ls -la | grep -v '^d'; echo '```'; echo
+  for r in $(ls -d iterations/*/ 2>/dev/null | sort | tail -4 | sed "s#/$##"); do
+    echo "## $r (depth 2)"; echo '```'
+    find "$r" -maxdepth 2 2>/dev/null | sort | head -120 | while read -r f; do
+      if [ -d "$f" ]; then printf "%6d KB  %s/\n" "$(du -sk "$f" | cut -f1)" "$f"; else printf "%6d KB  %s\n" "$(( ($(wc -c < "$f") + 1023) / 1024 ))" "$f"; fi
+    done
+    echo '```'; echo
+  done
+  echo "## Bytes by extension (whole workspace, excluding external/)"; echo '```'
+  find . -type f -not -path './.git/*' -not -path '*/external/*' -print0 2>/dev/null | xargs -0 du -k 2>/dev/null \
+    | awk '{f=$2; for(i=3;i<=NF;i++) f=f" "$i; n=split(f,p,"/"); b=p[n]; k=split(b,q,"."); e=(k>1)?q[k]:"(none)"; s[e]+=$1; c[e]++} END {for (e in s) printf "%8d MB %7d files  .%s\n", s[e]/1024, c[e], e}' | sort -rn | head -40
+  echo '```'
+} > .handoff/INVENTORY.md
+echo "wrote .handoff/INVENTORY.md"
+
+if [ "${SEED:-0}" = 1 ]; then
+  # First push: notes, transcripts, inventory, tooling only.
+  find . -maxdepth 1 -type f -size -5M -not -name '.DS_Store' -print0 | xargs -0 git add --
+  for p in .handoff .claude scripts .github; do [ -e "$p" ] && git add -- "$p"; done
+else
+  git add -A
+fi
 
 # 4. Safety check before pushing.
 TOTAL_KB="$(git ls-files -z | xargs -0 du -k 2>/dev/null | awk '{s+=$1} END {print s+0}')"
