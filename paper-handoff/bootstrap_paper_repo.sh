@@ -6,7 +6,7 @@
 set -euo pipefail
 
 PAPER_DIR="${1:-$HOME/Codes/AgentSkillsHack/iclr}"
-REMOTE="${2:-git@github.com:KuiyiGao/AgentSkillsHack-ICLR-Paper.git}"
+REMOTE="${2:-https://github.com/KuiyiGao/AgentSkillsHack-ICLR-Paper.git}"
 MAX_MB="${MAX_MB:-50}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -93,7 +93,7 @@ mkdir -p .handoff
   done | sort -rn | head -150
   echo '```'; echo
   echo "## Top-level files"; echo '```'; ls -la | grep -v '^d'; echo '```'; echo
-  for r in $(ls -d iterations/*/ 2>/dev/null | sort | tail -4 | sed "s#/$##"); do
+  for r in $(ls -d iterations/*/ 2>/dev/null | sort | tail -4 | sed 's:/$::'); do
     echo "## $r (depth 2)"; echo '```'
     find "$r" -maxdepth 2 2>/dev/null | sort | head -120 | while read -r f; do
       if [ -d "$f" ]; then printf "%6d KB  %s/\n" "$(du -sk "$f" | cut -f1)" "$f"; else printf "%6d KB  %s\n" "$(( ($(wc -c < "$f") + 1023) / 1024 ))" "$f"; fi
