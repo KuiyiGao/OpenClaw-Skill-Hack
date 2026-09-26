@@ -61,8 +61,22 @@ END='# <<< bootstrap <<<'
 echo "wrote DATA_SOURCES.md"
 
 # 3. Fresh index. If nothing was ever pushed, drop any local commit a previous run made.
-[ -d .git ] || git init -q -b main
+# Git must operate on PAPER_DIR itself, never on a parent repo it sits inside.
+HERE_REAL="$(pwd -P)"
+if [ "$(git rev-parse --show-toplevel 2>/dev/null)" != "$HERE_REAL" ]; then
+  if [ -e .git ]; then
+    echo "$HERE_REAL/.git exists but is not a valid repo (half-deleted?)." >&2
+    echo "Make sure no git process is still running (pgrep -fl git), then: rm -rf \"$HERE_REAL/.git\" and re-run." >&2
+    exit 1
+  fi
+  git init -q -b main
+fi
+[ "$(git rev-parse --show-toplevel)" = "$HERE_REAL" ] || { echo "git init failed in $HERE_REAL" >&2; exit 1; }
 git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
+case "$(git remote get-url origin)" in
+  *AgentSkillsHack-ICLR-Paper*) ;;
+  *) echo "origin is $(git remote get-url origin), expected AgentSkillsHack-ICLR-Paper; refusing to push." >&2; exit 1;;
+esac
 if ! git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
   git update-ref -d HEAD 2>/dev/null || true
 fi
