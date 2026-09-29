@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from firewall.config import Config
+from firewall.finance.capabilities import moves_money, rank
+from firewall.skills.discover import fin_capabilities_of, parse_skill_md
 
 
 SEVERITIES = ("NONE", "INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL")
@@ -52,6 +54,7 @@ def scan_skill_dir(d: Path, cfg: Config) -> list[Finding]:
     if md.exists():
         text = _read(md)
         findings.extend(_scan_md(md, text))
+        findings.extend(_scan_fin_manifest(md, text, cfg))
 
     for child in d.rglob("*"):
         if not child.is_file():
@@ -100,6 +103,20 @@ def _scan_md(md: Path, text: str) -> list[Finding]:
     for key in _SUS_FRONTMATTER_KEYS:
         if key in low:
             out.append(Finding("MEDIUM", f"frontmatter:{key}", str(md), key))
+    return out
+
+
+def _scan_fin_manifest(md: Path, text: str, cfg: Config) -> list[Finding]:
+    """Surface declared financial capabilities the way an installer shows permissions."""
+    meta, _ = parse_skill_md(text)
+    out: list[Finding] = []
+    for cap in fin_capabilities_of(meta):
+        if rank(cap) < 0:
+            out.append(Finding("LOW", "fin:unknown_capability", str(md), cap))
+        elif cap not in cfg.finance.allowed_capabilities:
+            out.append(Finding("HIGH", "fin:capability_exceeds_policy", str(md), cap))
+        elif moves_money(cap):
+            out.append(Finding("INFO", "fin:moves_money", str(md), cap))
     return out
 
 

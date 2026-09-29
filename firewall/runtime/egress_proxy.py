@@ -10,6 +10,8 @@ forward proxy:
   evidence and the client receives 403;
 * anything else is **captured** — the body is recorded as evidence but
   the upstream call is short-circuited (the request never leaves);
+* while ``finance.environment`` is paper, ``finance.live_hosts`` are
+  denied before any of the above, in every policy mode (invariant F4);
 * every decision is emitted as an event line the supervisor consumes.
 
 This is the "L1 containment" layer. Detection lives in
@@ -38,7 +40,7 @@ class _LiveConfig:
     """Re-read config from disk if the TOML mtime changed since last read.
 
     Cheap enough to call once per request (stat + maybe parse). Means that
-    \`firewall config mode strict\` from another shell takes effect on the
+    `firewall config mode strict` from another shell takes effect on the
     next request without restarting the proxy.
     """
     __slots__ = ("_cfg", "_path", "_mtime")
@@ -80,9 +82,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _emit(self, kind: str, host: str, method: str, path: str, **extra) -> None:
         self.emitter.emit(kind, host=host, method=method, path=path, **extra)
 
+    def _deny_live_trading(self, host: str, method: str, path: str) -> bool:
+        """F4: paper means paper. Checked before policy.mode, so observe denies too."""
+        if not self.cfg.blocks_live_trading(host):
+            return False
+        self._emit("egress.deny", host, method, path,
+                   reason="live trading host while finance.environment=paper")
+        self.send_error(403, "denied by firewall (paper trading only)")
+        return True
+
     # --- HTTPS (CONNECT) ------------------------------------------------
     def do_CONNECT(self) -> None:  # noqa: N802
         host, _, port = self.path.partition(":")
+        if self._deny_live_trading(host, "CONNECT", self.path):
+            return
         mode = self.cfg.policy.mode
         if self.cfg.host_denied(host) or self.cfg.is_hostile_host(host):
             if mode == "observe":
@@ -145,6 +158,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             body = self.rfile.read(length)
+        if self._deny_live_trading(host, method, path):
+            return
         mode = self.cfg.policy.mode  # strict | balanced | observe
         if self.cfg.host_denied(host) or self.cfg.is_hostile_host(host):
             if mode == "observe":

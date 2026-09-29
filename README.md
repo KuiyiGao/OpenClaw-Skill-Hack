@@ -106,6 +106,32 @@ firewall scan   ~/audit-me/one-skill # scan one skill
 `.codex/skills`, `.gemini/skills`, `.opencode/skills`, `.agents/skills`,
 and a bare `skills/`.</sub>
 
+## Financial agents: what may a skill do with money?
+
+A skill declares its financial capabilities, your policy caps them, and the
+firewall checks what the skill actually did.
+
+```yaml
+# SKILL.md frontmatter
+fin_capabilities: [market_data]      # market_data | account_read | trade | transfer
+```
+
+```toml
+# config.toml
+[finance]
+environment = "paper"                # live trading hosts are denied, in every mode
+allowed_capabilities = ["market_data", "account_read", "trade"]
+```
+
+A run where a "quote" skill places an order is judged **BLOCK** (money
+movement is never implicit), and so is one that reads positions and sends
+them to an unknown host (account data is a taint source). That verdict comes
+from the run's evidence, after the fact. What the proxy stops *before* it
+leaves is live trading while in paper mode; stopping an order before it is
+sent is the pre-trade guard on the roadmap. To see how a request is
+classified: `firewall finance classify paper-api.alpaca.markets POST /v2/orders`.
+Design, invariants F1–F4 and roadmap: [FINANCE.md](FINANCE.md).
+
 ---
 
 <details>
@@ -246,6 +272,7 @@ skills by editing its volume in `firewall/docker/compose.yml`.
 | `firewall skills [--dir <p>]` | list every skill on disk (framework-agnostic) |
 | `firewall agents` | list the agent frameworks the firewall adapts to |
 | `firewall hook <agent>` | print env-vars / config to route an agent through the proxy |
+| `firewall finance classify <host> [METHOD] [path]` / `--tool <name>` | which financial capability a request or tool maps to |
 | `firewall integrations openclaw-bootstrap` | print absolute path to the Node `--require` helper |
 | `firewall doctor` | health check (config, API-key env var, ports, optional tools) |
 
@@ -279,6 +306,13 @@ secret_env   = ["DEEPSEEK_API_KEY", "AWS_SECRET_ACCESS_KEY"]
 refusal_patterns    = [ ... ]   # tie-breaker only
 compliance_patterns = [ ... ]
 judge_prompt_path   = ""        # optional Markdown file with YOUR judge prompt
+
+[finance]
+environment          = "paper"  # paper | live
+allowed_capabilities = ["market_data", "account_read", "trade"]
+live_hosts           = ["api.alpaca.markets", "api.binance.com"]
+endpoints            = [ ... ]  # request (host, method, path) -> capability
+tool_capabilities    = [ ... ]  # tool name -> capability
 ```
 
 The judge prompt is opt-in — the runtime is fully deterministic by default;
@@ -299,6 +333,7 @@ The five invariants the ladder enforces are in
 [firewall/runtime/firewall.py](firewall/runtime/firewall.py) and pinned by one
 named test each in
 [tests/unit/test_firewall_invariants.py](tests/unit/test_firewall_invariants.py).
+The financial plane adds F1–F4; see [FINANCE.md](FINANCE.md).
 
 </details>
 
@@ -319,6 +354,7 @@ firewall/
   config.py         TOML loader + default patterns
   runtime/          L2 IAR verifier, egress proxy, canary, supervisor, events
   gate/             L0 static scanner
+  finance/          capability vocabulary + catalog classifier (financial plane)
   skills/           SKILL.md discovery (dirs sourced from the agent registry)
   integrations/     agents.py registry + openclaw/proxy-bootstrap.js
   panel/            tui.py (terminal) + web.html/web.py (browser)

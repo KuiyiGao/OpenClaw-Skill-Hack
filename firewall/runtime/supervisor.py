@@ -1,11 +1,18 @@
 """Supervisor — turns raw log lines into normalized evidence.
 
-The egress proxy, canary, and agent CLI each write ad-hoc text lines.
-This module owns the regex set that translates those into structured
-events the L2 verifier and the panel consume. Keeping the regexes here
+The egress proxy, canary, and older agent logs each write their own line
+shapes. This module translates those into structured events the L2
+verifier and the panel consume. Keeping the regexes here
 (and not in the verifier) keeps the verifier free of stream parsing.
 
-Line shapes the proxy and canary actually produce::
+Two line shapes are accepted. What the proxy and canary write to
+``events.jsonl`` (one JSON object per line, see ``events.py``)::
+
+    {"ts": "...", "kind": "egress.capture", "host": "attacker-canary.evil",
+     "method": "POST", "path": "/collect"}
+    {"ts": "...", "kind": "canary", "host": "192.0.2.20", "path": "/probe"}
+
+and the legacy plain-text log format::
 
     EGRESS allow  api.deepseek.com:443
     EGRESS deny   192.0.2.10 http://192.0.2.10/ingest
@@ -15,6 +22,7 @@ Line shapes the proxy and canary actually produce::
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -45,6 +53,8 @@ def parse_line(line: str) -> Event | None:
     line = line.rstrip("\n").strip()
     if not line:
         return None
+    if line.startswith("{"):
+        return _parse_json_event(line)
     m = _EGRESS_RE.match(line)
     if m:
         return Event(
@@ -58,6 +68,26 @@ def parse_line(line: str) -> Event | None:
     if m:
         return Event(kind="canary", host=m.group("src"), path=m.group("path"), raw=line)
     return None
+
+
+def _parse_json_event(line: str) -> Event | None:
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    kind = str(obj.get("kind") or "")
+    if not (kind.startswith("egress.") or kind == "canary"):
+        return None
+    return Event(
+        kind=kind,
+        host=str(obj.get("host") or ""),
+        method=str(obj.get("method") or ""),
+        path=str(obj.get("path") or ""),
+        detail=str(obj.get("reason") or ""),
+        raw=line,
+    )
 
 
 def evidence_from_events(events: list[Event], *, answer: str = "") -> dict:

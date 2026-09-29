@@ -26,6 +26,17 @@ edits `config.toml`. Each one is pinned by a single named test in
 | 4 | Unknown is not guilty | `test_unknown_destination_alone_is_not_malicious` |
 | 5 | IAR 3-plane shape (no bodies) | `test_iar_egress_plane_has_no_body` |
 
+The financial plane adds four more, pinned in
+[tests/unit/test_finance_invariants.py](tests/unit/test_finance_invariants.py)
+(see [FINANCE.md](FINANCE.md)):
+
+| # | Invariant | Test |
+|---|---|---|
+| F1 | Money movement is never implicit | `test_undeclared_money_movement_is_malicious` |
+| F2 | Ambiguity is not guilt | `test_host_level_financial_ambiguity_is_not_guilt` |
+| F3 | Account data is a taint source | `test_account_data_plus_oop_send_is_malicious` |
+| F4 | Paper means paper | `test_paper_mode_denies_live_hosts_even_in_observe` |
+
 If a change makes any of these fail, the change is wrong, not the test.
 
 ## Policy lives in TOML, not code
@@ -48,7 +59,7 @@ trail must remain in their TOML.
 ## Submitting
 
 1. Add a test for the invariant or behaviour you're changing.
-2. `make test` — all 21+ tests must pass on Python 3.10–3.12.
+2. `make test` — all tests must pass on Python 3.10–3.12.
 3. Open a PR; CI runs the same matrix.
 
 ## License

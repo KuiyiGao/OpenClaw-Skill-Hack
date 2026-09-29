@@ -50,3 +50,19 @@ def test_registry_covers_hermes_and_openclaw():
     assert resolve("nous-hermes").key == "hermes"     # alias resolves
     assert resolve("totally-unknown").key == "generic"  # safe fallback
     assert ".hermes/skills" in project_skill_dirs()
+
+
+def test_fin_capabilities_parsed_from_manifest():
+    examples = Path(__file__).resolve().parents[2] / "firewall" / "examples" / "skills"
+    assert load_skill(examples / "finance-quote-safe").fin_capabilities == ["market_data"]
+    trader = load_skill(examples / "finance-paper-trader")
+    assert trader.fin_capabilities == ["market_data", "account_read", "trade"]
+    assert trader.to_intent()["fin_capabilities"] == trader.fin_capabilities
+
+
+def test_fin_capabilities_accepted_under_metadata(tmp_path: Path):
+    d = tmp_path / "s"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: s\ndescription: x\nmetadata:\n  fin_capabilities: Market_Data, trade\n---\nbody")
+    assert load_skill(d).fin_capabilities == ["market_data", "trade"]

@@ -38,6 +38,7 @@ class Skill:
     assets: list[Path] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=list)
     allow_hosts: list[str] = field(default_factory=list)
+    fin_capabilities: list[str] = field(default_factory=list)
     body: str = ""
     raw: dict = field(default_factory=dict)
 
@@ -48,6 +49,7 @@ class Skill:
             "description": self.description,
             "allowed_tools": list(self.allowed_tools),
             "allow_hosts": list(self.allow_hosts),
+            "fin_capabilities": list(self.fin_capabilities),
         }
 
 
@@ -132,6 +134,7 @@ def load_skill(path: str | Path) -> Skill | None:
         assets=assets,
         allowed_tools=_as_list(meta.get("allowed_tools") or meta.get("allowed-tools")),
         allow_hosts=_as_list(meta.get("allow_hosts") or meta.get("allow-hosts")),
+        fin_capabilities=fin_capabilities_of(meta),
         body=body,
         raw=meta,
     )
@@ -143,6 +146,20 @@ def _as_list(v) -> list[str]:
     if isinstance(v, list):
         return [str(x) for x in v]
     return [str(v)]
+
+
+def fin_capabilities_of(meta: dict) -> list[str]:
+    """Declared financial capabilities: top-level or under ``metadata:``.
+
+    Accepts a YAML list or a comma/space separated string.
+    """
+    v = meta.get("fin_capabilities") or meta.get("fin-capabilities")
+    nested = meta.get("metadata")
+    if v is None and isinstance(nested, dict):
+        v = nested.get("fin_capabilities") or nested.get("fin-capabilities")
+    if isinstance(v, str):
+        v = re.split(r"[,\s]+", v)
+    return [x for x in (s.strip().lower() for s in _as_list(v)) if x]
 
 
 # Skill directories come from the agent registry so a new framework only has
@@ -203,4 +220,4 @@ def discover_skills(
     return skills
 
 
-__all__ = ["Skill", "discover_skills", "load_skill", "parse_skill_md"]
+__all__ = ["Skill", "discover_skills", "load_skill", "parse_skill_md", "fin_capabilities_of"]

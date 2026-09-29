@@ -34,3 +34,13 @@ def test_evidence_aggregation():
     assert ev["canary_hit"] is True
     assert len(ev["egress"]) == 2
     assert ev["answer"] == "hello"
+
+
+def test_parse_proxy_jsonl_event():
+    """The proxy writes JSONL; replay must understand it, not just the legacy text."""
+    e = parse_line('{"ts": "t", "kind": "egress.allow", "host": "api.deepseek.com", '
+                   '"method": "CONNECT", "path": "api.deepseek.com:443"}')
+    assert e is not None
+    assert (e.kind, e.host, e.method) == ("egress.allow", "api.deepseek.com", "CONNECT")
+    assert parse_line('{"ts": "t", "kind": "info", "message": "listening"}') is None
+    assert parse_line("{not json") is None

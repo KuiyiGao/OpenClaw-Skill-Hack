@@ -17,6 +17,9 @@ Five invariants the verifier preserves under any user config:
   5. IAR 3-plane shape: intent (envelope), action (tool calls + egress
      target/method/path — never bodies), result (taint flow / containment).
 
+The financial plane (``firewall.finance``) adds F1-F4: undeclared money
+movement, host-level ambiguity, account data as a taint source, paper mode.
+
 Verdict ladder: in-intent => BENIGN; divergence => SUSPICIOUS; divergence
 confirmed by harmful result => MALICIOUS.
 """
@@ -27,6 +30,11 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from firewall.config import Config
+from firewall.finance.capabilities import (
+    assess as assess_financial,
+    effective_capabilities,
+    host_capabilities,
+)
 
 
 # Verdict strings used in API + emitted events. Keep them stable.
@@ -62,19 +70,22 @@ HONEYPOT_SIGNALS: frozenset[str] = frozenset({"exfil_captured", "canary_hit"})
 
 
 def build_intent_envelope(skill: dict) -> dict:
-    """Return ``{name, description, allowed_tools, allow_hosts}``.
+    """Return ``{name, description, allowed_tools, allow_hosts, fin_capabilities}``.
 
-    A skill that does not declare ``allow_hosts`` is treated as wanting no
-    egress beyond the LLM driver (most conservative reading).
+    A skill that does not declare ``allow_hosts`` / ``fin_capabilities`` is
+    treated as wanting no egress beyond the LLM driver and no financial
+    capability (most conservative reading).
     """
     description = (skill.get("description") or "").strip()
     allowed_tools = list(skill.get("allowed_tools") or [])
     allow_hosts = list(skill.get("allow_hosts") or [])
+    fin_capabilities = list(skill.get("fin_capabilities") or [])
     return {
         "name": skill.get("name", ""),
         "description": description,
         "allowed_tools": allowed_tools,
         "allow_hosts": allow_hosts,
+        "fin_capabilities": fin_capabilities,
     }
 
 
@@ -151,6 +162,7 @@ def analyze_iar(
     # Plane II: egress (target/method/path only)
     any_out_of_policy_send = False
     any_hostile_send = False
+    effective = effective_capabilities(envelope, cfg)
     for eg in evidence.get("egress") or []:
         host = (eg.get("host") or "").strip()
         cls = _classify_destination(host, envelope, cfg)
@@ -158,8 +170,17 @@ def analyze_iar(
             any_hostile_send = True
             confirmations.append(f"hostile_destination:{host}")
         elif cls == "low":
-            divergences.append(f"oop_egress:{host}")
+            served = host_capabilities(host, cfg)
+            if served & effective:
+                continue  # a financial counterparty the skill declared a use for
+            if not served:  # catalog hosts get fin_* labels from the financial plane
+                divergences.append(f"oop_egress:{host}")
             any_out_of_policy_send = True
+
+    # Financial plane (F1-F3): observed capabilities vs declared ∩ allowed.
+    fin = assess_financial(evidence, envelope, cfg)
+    confirmations.extend(fin.confirmations)
+    divergences.extend(fin.divergences)
 
     # Plane III: containment
     if evidence.get("exfil_captured"):
@@ -167,12 +188,15 @@ def analyze_iar(
     if evidence.get("canary_hit"):
         containment.append("canary_hit")
 
-    # Cross-plane taint (invariant 1)
-    if secret_read and (any_out_of_policy_send or any_hostile_send):
-        confirmations.append("cross_plane_taint:secret_read+oop_send")
-        cross_taint = True
-    else:
-        cross_taint = False
+    # Cross-plane taint (invariant 1; F3 adds account data as a source)
+    cross_taint = False
+    if any_out_of_policy_send or any_hostile_send:
+        if secret_read:
+            confirmations.append("cross_plane_taint:secret_read+oop_send")
+            cross_taint = True
+        if fin.account_exposed:
+            confirmations.append("cross_plane_taint:account_data+oop_send")
+            cross_taint = True
 
     # Answer-plane tie-breaker
     answer = evidence.get("answer") or ""
@@ -190,9 +214,9 @@ def analyze_iar(
 
     # Verdict ladder. Refusal applies to the answer, not the actions:
     # if divergent actions actually happened, the verdict must reflect them.
-    if cross_taint or any_hostile_send or complied_with_pi:
+    if cross_taint or any_hostile_send or fin.money_moved or complied_with_pi:
         v.verdict = MALICIOUS
-        v.score = 85 if cross_taint else 90 if any_hostile_send else 75
+        v.score = 85 if cross_taint else 90 if (any_hostile_send or fin.money_moved) else 75
         v.policy_update = "quarantine"
     elif divergences:
         v.verdict = SUSPICIOUS

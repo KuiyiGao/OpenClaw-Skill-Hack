@@ -10,6 +10,7 @@ Subcommands::
     firewall watch <skill_dir>         # L2 verdict from a stored log
     firewall skills                    # list discovered skills
     firewall hook <agent>              # print env-vars to route an agent through the proxy
+    firewall finance classify ...      # which financial capability a request/tool maps to
 
 Logic lives in ``firewall.runtime`` and ``firewall.gate``; policy in
 ``~/.config/firewall/config.toml``. The config stores the NAME of the env
@@ -50,6 +51,8 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect or initialise ~/.config/firewall/config.toml")
 app.add_typer(config_app, name="config")
+finance_app = typer.Typer(help="Financial capability catalog ([finance] in config.toml)")
+app.add_typer(finance_app, name="finance")
 
 console = Console()
 
@@ -105,6 +108,9 @@ def config_show() -> None:
     row("egress", "allow_hosts", ", ".join(cfg.egress.allow_hosts[:5]) + " ...")
     row("egress", "deny_hosts", ", ".join(cfg.egress.deny_hosts[:5]) + " ...")
     row("secrets", "secret_paths", ", ".join(cfg.secrets.secret_paths[:5]))
+    row("finance", "environment", cfg.finance.environment)
+    row("finance", "allowed_capabilities", ", ".join(cfg.finance.allowed_capabilities))
+    row("finance", "live_hosts", ", ".join(cfg.finance.live_hosts))
     row("state", "events_path", cfg.state.events_path)
     console.print(t)
 
@@ -362,10 +368,46 @@ def skills(
         console.print("no skills found — looked in .claude/skills, .openclaw/skills, skills/ and ~ equivalents")
         return
     t = Table(title=f"{len(discovered)} skills found")
-    t.add_column("name"); t.add_column("version"); t.add_column("path"); t.add_column("description")
+    t.add_column("name"); t.add_column("version"); t.add_column("fin")
+    t.add_column("path"); t.add_column("description")
     for s in discovered:
-        t.add_row(s.name, s.version or "—", str(s.path), s.description[:60])
+        fin = ", ".join(s.fin_capabilities) or "—"
+        t.add_row(s.name, s.version or "—", fin, str(s.path), s.description[:60])
     console.print(t)
+
+
+@finance_app.command("classify")
+def finance_classify(
+    host: str = typer.Argument("", help="request host, e.g. paper-api.alpaca.markets"),
+    method: str = typer.Argument("", help="HTTP method; omit to classify as a CONNECT"),
+    path: str = typer.Argument("", help="request path, e.g. /v2/orders"),
+    tool: str = typer.Option("", "--tool", help="classify a tool name instead"),
+) -> None:
+    """Show which capability a request or tool maps to under the current catalog."""
+    from firewall.finance.capabilities import classify_request, classify_tool
+
+    cfg = _load_or_die()
+    if path and not path.startswith("/"):
+        path = "/" + path
+    if tool:
+        action = classify_tool(tool, cfg)
+    elif host:
+        action = classify_request(host, method or "CONNECT", path, cfg)
+    else:
+        console.print("[red]give a HOST [METHOD PATH], or --tool NAME[/red]")
+        raise typer.Exit(2)
+    if action is None:
+        console.print("not a financial endpoint (no rule in finance.endpoints / tool_capabilities)")
+    else:
+        how = "exact" if action.exact else "host-level upper bound"
+        allowed = action.capability in cfg.finance.allowed_capabilities
+        console.print(
+            f"[bold]{action.capability}[/bold] ({how})  "
+            f"policy: {'allowed' if allowed else '[red]not allowed[/red]'}"
+        )
+    if host and cfg.blocks_live_trading(host):
+        console.print(f"[red]live trading host — denied while finance.environment = "
+                      f"{cfg.finance.environment!r}[/red]")
 
 
 @app.command("hook")
@@ -459,6 +501,13 @@ def doctor() -> None:
         has_key = bool(os.environ.get(env_name))
         checks.append((f"${env_name} set", has_key,
                        "found" if has_key else f"export {env_name}=..."))
+
+    if cfg is not None:
+        from firewall.finance.capabilities import catalog_problems
+        problems = catalog_problems(cfg)
+        checks.append(("finance policy well-formed", not problems,
+                       "; ".join(problems[:3]) + (" ..." if len(problems) > 3 else "")
+                       if problems else "ok"))
 
     def _port_free(host: str, port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

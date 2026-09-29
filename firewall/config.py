@@ -146,6 +146,58 @@ class TaintConfig:
     ])
 
 
+_ALPACA_TRADING = ("api.alpaca.markets", "paper-api.alpaca.markets")
+_BINANCE_SPOT = ("api.binance.com", "testnet.binance.vision")
+
+
+@dataclass
+class FinanceConfig:
+    """Financial capability policy; vocabulary in ``firewall.finance.capabilities``.
+
+    A skill may use the capabilities it declares (``fin_capabilities`` in
+    SKILL.md) that are also in ``allowed_capabilities``.
+    """
+    # Anything other than "live" is treated as "paper" (fail closed).
+    environment: str = "paper"
+    allowed_capabilities: list[str] = field(default_factory=lambda: [
+        "market_data", "account_read", "trade",
+    ])
+    # Denied at the proxy while environment is paper, in every policy mode.
+    live_hosts: list[str] = field(default_factory=lambda: [
+        "api.alpaca.markets", "api.binance.com",
+    ])
+    # Request -> capability. A rule without method/path is a host-level upper
+    # bound, the only kind that can match a CONNECT.
+    endpoints: list[dict] = field(default_factory=lambda: [
+        {"host": ["data.alpaca.markets", "stream.data.alpaca.markets"], "capability": "market_data"},
+        {"host": "paper-api.alpaca.markets", "capability": "trade"},
+        {"host": "api.alpaca.markets", "capability": "transfer"},
+        {"host": list(_ALPACA_TRADING), "method": "GET", "path": "/v2/*", "capability": "account_read"},
+        {"host": list(_ALPACA_TRADING), "method": "POST", "path": "/v2/orders*", "capability": "trade"},
+        {"host": list(_ALPACA_TRADING), "method": "PATCH", "path": "/v2/orders/*", "capability": "trade"},
+        {"host": list(_ALPACA_TRADING), "method": "DELETE", "path": "/v2/orders*", "capability": "trade"},
+        {"host": list(_ALPACA_TRADING), "method": "POST", "path": "/v2/positions/*", "capability": "trade"},
+        {"host": list(_ALPACA_TRADING), "method": "DELETE", "path": "/v2/positions*", "capability": "trade"},
+        {"host": "api.binance.com", "capability": "transfer"},
+        {"host": "testnet.binance.vision", "capability": "trade"},
+        {"host": list(_BINANCE_SPOT), "method": "GET", "path": "/api/v3/*", "capability": "market_data"},
+        {"host": list(_BINANCE_SPOT), "method": "GET", "path": "/api/v3/account*", "capability": "account_read"},
+        {"host": list(_BINANCE_SPOT), "method": "GET", "path": "/api/v3/myTrades*", "capability": "account_read"},
+        {"host": list(_BINANCE_SPOT), "method": "GET", "path": "/api/v3/*order*", "capability": "account_read"},
+        {"host": list(_BINANCE_SPOT), "method": "POST", "path": "/api/v3/order*", "capability": "trade"},
+        {"host": list(_BINANCE_SPOT), "method": "DELETE", "path": "/api/v3/*order*", "capability": "trade"},
+        {"host": "api.binance.com", "method": "POST", "path": "/sapi/v1/capital/withdraw/*", "capability": "transfer"},
+    ])
+    # Tool name (case-insensitive regex) -> capability; highest match wins.
+    tool_capabilities: list[dict] = field(default_factory=lambda: [
+        {"pattern": r"(place|submit|replace|cancel)\w*order", "capability": "trade"},
+        {"pattern": r"close\w*position|liquidat", "capability": "trade"},
+        {"pattern": r"withdraw|transfer_funds|wire_transfer", "capability": "transfer"},
+        {"pattern": r"get\w*(account|position|portfolio|balance|order)", "capability": "account_read"},
+        {"pattern": r"get\w*(quote|bars|ticker|snapshot|clock|calendar)", "capability": "market_data"},
+    ])
+
+
 @dataclass
 class StateConfig:
     events_path: str = ""        # filled by ``load_config`` from XDG
@@ -168,6 +220,7 @@ class Config:
     secrets: SecretsConfig = field(default_factory=SecretsConfig)
     judge: JudgeConfig = field(default_factory=JudgeConfig)
     taint: TaintConfig = field(default_factory=TaintConfig)
+    finance: FinanceConfig = field(default_factory=FinanceConfig)
     state: StateConfig = field(default_factory=StateConfig)
     panel: PanelConfig = field(default_factory=PanelConfig)
     # USD per 1M tokens, keyed by "provider/model". Unknown pairs render as "$ —".
@@ -197,6 +250,10 @@ class Config:
         if any(s in host_l for s in self.taint.exfil_host_substrings):
             return True
         return any(host_l.endswith(t) for t in self.taint.pseudo_tlds)
+
+    def blocks_live_trading(self, host: str) -> bool:
+        live = str(self.finance.environment).strip().lower() == "live"
+        return not live and _host_match(host, self.finance.live_hosts)
 
 
 def _host_match(host: str, patterns: list[str]) -> bool:
@@ -237,7 +294,7 @@ def load_config(path: Path | str | None = None) -> Config:
         return _fill_state_defaults(cfg)
     data = tomllib.loads(p.read_text(encoding="utf-8"))
     for section in ("driver", "policy", "egress", "secrets",
-                    "judge", "taint", "state", "panel"):
+                    "judge", "taint", "finance", "state", "panel"):
         if section in data and isinstance(data[section], dict):
             target = getattr(cfg, section)
             for k, v in data[section].items():
@@ -334,6 +391,59 @@ exfil_host_substrings = [ "attacker-canary", "webhook.site", "requestbin" ]
 # Pseudo-TLDs used in CANARY testing.
 pseudo_tlds = [ ".evil", ".attack", ".canary" ]
 
+[finance]
+# What a skill may do with money. A skill declares its capabilities in SKILL.md
+# frontmatter, e.g. `fin_capabilities: [market_data]`. Low -> high risk:
+#   market_data   quotes, bars, reference data
+#   account_read  balances, positions, order history
+#   trade         place / replace / cancel orders, close positions
+#   transfer      withdrawals and wires out of the account
+# A skill may use what it declares AND this section allows. Anything else is a
+# divergence; an undeclared or forbidden trade/transfer is MALICIOUS.
+
+# paper: every host in live_hosts is denied at the proxy in EVERY policy mode,
+# observe included. Any value other than "live" is treated as "paper".
+environment = "paper"
+allowed_capabilities = ["market_data", "account_read", "trade"]
+live_hosts = ["api.alpaca.markets", "api.binance.com"]
+
+# Request -> capability. A rule without method/path is a host-level upper bound:
+# the most a request to that host could do, and the only rule a CONNECT (HTTPS)
+# can match. Most specific rule wins (longest path pattern, then a named
+# method); ties go to the higher capability. Paths match case-insensitively.
+# Reference entries: verify them against your broker's current API docs. Live
+# hosts assume the worst (transfer) until you have checked their API surface.
+endpoints = [
+  { host = ["data.alpaca.markets", "stream.data.alpaca.markets"], capability = "market_data" },
+  { host = "paper-api.alpaca.markets", capability = "trade" },
+  { host = "api.alpaca.markets", capability = "transfer" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "GET", path = "/v2/*", capability = "account_read" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "POST", path = "/v2/orders*", capability = "trade" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "PATCH", path = "/v2/orders/*", capability = "trade" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "DELETE", path = "/v2/orders*", capability = "trade" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "POST", path = "/v2/positions/*", capability = "trade" },
+  { host = ["api.alpaca.markets", "paper-api.alpaca.markets"], method = "DELETE", path = "/v2/positions*", capability = "trade" },
+  { host = "api.binance.com", capability = "transfer" },
+  { host = "testnet.binance.vision", capability = "trade" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "GET", path = "/api/v3/*", capability = "market_data" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "GET", path = "/api/v3/account*", capability = "account_read" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "GET", path = "/api/v3/myTrades*", capability = "account_read" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "GET", path = "/api/v3/*order*", capability = "account_read" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "POST", path = "/api/v3/order*", capability = "trade" },
+  { host = ["api.binance.com", "testnet.binance.vision"], method = "DELETE", path = "/api/v3/*order*", capability = "trade" },
+  { host = "api.binance.com", method = "POST", path = "/sapi/v1/capital/withdraw/*", capability = "transfer" },
+]
+
+# Tool name (case-insensitive regex, TOML literal strings) -> capability.
+# Matched on the tool NAME only; the highest capability that matches wins.
+tool_capabilities = [
+  { pattern = '(place|submit|replace|cancel)\\w*order', capability = "trade" },
+  { pattern = 'close\\w*position|liquidat', capability = "trade" },
+  { pattern = 'withdraw|transfer_funds|wire_transfer', capability = "transfer" },
+  { pattern = 'get\\w*(account|position|portfolio|balance|order)', capability = "account_read" },
+  { pattern = 'get\\w*(quote|bars|ticker|snapshot|clock|calendar)', capability = "market_data" },
+]
+
 [panel]
 refresh_hz       = 1.0
 keep_rows        = 200
@@ -361,7 +471,8 @@ def init_default(path: Path | str | None = None, *, overwrite: bool = False) -> 
 
 __all__ = [
     "Config", "DriverConfig", "PolicyConfig", "EgressConfig",
-    "SecretsConfig", "JudgeConfig", "TaintConfig", "StateConfig", "PanelConfig",
+    "SecretsConfig", "JudgeConfig", "TaintConfig", "FinanceConfig",
+    "StateConfig", "PanelConfig",
     "load_config", "init_default",
     "config_dir", "state_dir", "cache_dir", "config_path",
     "DEFAULT_CONFIG_TOML",
